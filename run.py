@@ -24,23 +24,29 @@ def check_python_version():
 
 def check_dependencies():
     """Check if required dependencies are installed"""
-    required_packages = [
-        'flask', 'requests', 'beautifulsoup4', 
-        'google-generativeai', 'urllib3'
-    ]
+    # Map pip package names to their import names
+    required_packages = {
+        'flask': 'flask',
+        'requests': 'requests', 
+        'beautifulsoup4': 'bs4',  # beautifulsoup4 imports as bs4
+        'google-generativeai': 'google.generativeai',  # google-generativeai imports as google.generativeai
+        'urllib3': 'urllib3'
+    }
     
     missing_packages = []
-    for package in required_packages:
+    for pip_name, import_name in required_packages.items():
         try:
-            __import__(package.replace('-', '_'))
+            __import__(import_name)
+            print(f"✅ {pip_name}")
         except ImportError:
-            missing_packages.append(package)
+            print(f"❌ {pip_name}")
+            missing_packages.append(pip_name)
     
     if missing_packages:
-        print("❌ Missing required packages:")
-        for package in missing_packages:
-            print(f"   - {package}")
+        print(f"\n❌ Missing {len(missing_packages)} required packages")
         print("\nInstall missing packages with:")
+        print("   pip install " + " ".join(missing_packages))
+        print("   # OR")
         print("   pip install -r requirements.txt")
         return False
     

@@ -23,22 +23,27 @@ def test_python_version():
 
 def test_dependencies():
     """Test if all required dependencies are available"""
-    required_modules = [
-        'flask',
-        'requests', 
-        'bs4',  # beautifulsoup4
-        'google.generativeai',
-        'urllib3'
-    ]
+    # Map pip package names to their import names
+    required_modules = {
+        'flask': 'flask',
+        'requests': 'requests', 
+        'beautifulsoup4': 'bs4',  # beautifulsoup4 imports as bs4
+        'google-generativeai': 'google.generativeai',  # google-generativeai imports as google.generativeai
+        'urllib3': 'urllib3'
+    }
     
     missing = []
-    for module in required_modules:
+    for pip_name, import_name in required_modules.items():
         try:
-            __import__(module)
-            print(f"✅ {module}")
+            __import__(import_name)
+            print(f"✅ {pip_name}")
         except ImportError:
-            print(f"❌ {module}")
-            missing.append(module)
+            print(f"❌ {pip_name}")
+            missing.append(pip_name)
+    
+    if missing:
+        print(f"\nMissing packages: {', '.join(missing)}")
+        print("Install with: pip install " + " ".join(missing))
     
     return len(missing) == 0
 
