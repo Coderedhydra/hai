@@ -312,16 +312,31 @@ class VulnerabilityScanner {
     }
 
     renderResult(result) {
-        const severityClass = this.getSeverityClass(result.confidence_score, result.is_vulnerable);
-        const statusBadge = result.is_vulnerable ? 
-            '<span class="badge bg-danger">Vulnerable</span>' :
-            '<span class="badge bg-success">Safe</span>';
+        const severityClass = this.getSeverityClass(result.severity || 'LOW', result.is_vulnerable, result.data_extracted);
+        
+        let statusBadge;
+        if (result.data_extracted) {
+            statusBadge = '<span class="badge bg-danger pulse"><i class="fas fa-skull-crossbones"></i> DATA EXTRACTED</span>';
+        } else if (result.is_vulnerable) {
+            statusBadge = '<span class="badge bg-warning">Vulnerable</span>';
+        } else {
+            statusBadge = '<span class="badge bg-success">Safe</span>';
+        }
+        
+        // Format extracted data for display
+        let extractedDataHtml = '';
+        if (result.data_extracted && result.extracted_data) {
+            extractedDataHtml = this.formatExtractedData(result.extracted_data);
+        }
+        
+        const cardClass = result.data_extracted ? 'border-danger bg-danger-subtle' : 
+                         result.is_vulnerable ? 'border-warning' : '';
         
         return `
-            <div class="card mb-3 vulnerability-item ${severityClass}">
+            <div class="card mb-3 vulnerability-item ${severityClass} ${cardClass}">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-start mb-2">
-                        <h6 class="card-title mb-0">${result.vulnerability_type}</h6>
+                        <h6 class="card-title mb-0 ${result.data_extracted ? 'text-danger fw-bold' : ''}">${result.vulnerability_type}</h6>
                         ${statusBadge}
                     </div>
                     
@@ -329,6 +344,7 @@ class VulnerabilityScanner {
                         <strong>URL:</strong> <code class="text-break">${result.target_url}</code><br>
                         <strong>Timestamp:</strong> ${new Date(result.timestamp).toLocaleString()}<br>
                         <strong>Response Code:</strong> ${result.response_code}<br>
+                        <strong>Severity:</strong> <span class="badge ${this.getSeverityBadgeClass(result.severity || 'LOW')}">${result.severity || 'LOW'}</span><br>
                         <strong>Confidence:</strong> 
                         <span class="${this.getConfidenceClass(result.confidence_score)}">
                             ${(result.confidence_score * 100).toFixed(1)}%
@@ -340,7 +356,15 @@ class VulnerabilityScanner {
                         <div class="payload-code mt-1">${this.escapeHtml(result.payload)}</div>
                     </div>
                     
-                    ${result.is_vulnerable ? `
+                    ${extractedDataHtml}
+                    
+                    ${result.data_extracted ? `
+                        <div class="alert alert-danger mt-2 mb-0">
+                            <i class="fas fa-skull-crossbones"></i>
+                            <strong>CRITICAL: Data Extraction Successful!</strong> 
+                            This vulnerability has been confirmed with actual data extraction. Immediate action required!
+                        </div>
+                    ` : result.is_vulnerable ? `
                         <div class="alert alert-warning mt-2 mb-0">
                             <i class="fas fa-exclamation-triangle"></i>
                             <strong>Vulnerability Detected!</strong> This endpoint may be vulnerable to ${result.vulnerability_type}.
@@ -350,12 +374,65 @@ class VulnerabilityScanner {
             </div>
         `;
     }
+    
+    formatExtractedData(extractedData) {
+        if (!extractedData) return '';
+        
+        let html = '<div class="mt-3"><strong class="text-danger">🔥 EXTRACTED DATA:</strong><div class="border border-danger rounded p-2 mt-2 bg-light">';
+        
+        if (typeof extractedData === 'object') {
+            for (const [key, value] of Object.entries(extractedData)) {
+                if (key === '_credentials') {
+                    html += `<div class="mb-2"><strong class="text-danger">Credentials Found:</strong>`;
+                    if (Array.isArray(value)) {
+                        value.forEach(cred => {
+                            html += `<br><code class="text-danger">${this.escapeHtml(cred)}</code>`;
+                        });
+                    }
+                    html += '</div>';
+                } else if (key === 'database_type') {
+                    html += `<div class="mb-1"><strong>Database:</strong> <span class="badge bg-info">${value}</span></div>`;
+                } else if (key === 'databases') {
+                    html += `<div class="mb-1"><strong>Database Names:</strong> ${Array.isArray(value) ? value.join(', ') : value}</div>`;
+                } else if (key === 'tables') {
+                    html += `<div class="mb-1"><strong>Tables:</strong> ${Array.isArray(value) ? value.join(', ') : value}</div>`;
+                } else if (key === 'user_data') {
+                    html += `<div class="mb-1"><strong class="text-danger">User Data:</strong> ${Array.isArray(value) ? value.join('<br>') : value}</div>`;
+                } else if (typeof value === 'object' && value.content) {
+                    html += `<div class="mb-2"><strong>File ${key}:</strong><br>`;
+                    html += `<small class="text-muted">Type: ${value.type}, Size: ${value.size} bytes</small><br>`;
+                    html += `<pre class="small text-danger">${this.escapeHtml(value.content.substring(0, 200))}${value.content.length > 200 ? '...' : ''}</pre></div>`;
+                } else {
+                    html += `<div class="mb-1"><strong>${key}:</strong> ${this.escapeHtml(String(value))}</div>`;
+                }
+            }
+        } else {
+            html += `<pre class="text-danger">${this.escapeHtml(String(extractedData))}</pre>`;
+        }
+        
+        html += '</div></div>';
+        return html;
+    }
 
-    getSeverityClass(confidence, isVulnerable) {
+    getSeverityClass(severity, isVulnerable, dataExtracted) {
+        if (dataExtracted) return 'critical-risk';
         if (!isVulnerable) return 'low-risk';
-        if (confidence >= 0.8) return 'high-risk';
-        if (confidence >= 0.5) return 'medium-risk';
-        return 'low-risk';
+        
+        switch(severity) {
+            case 'CRITICAL': return 'critical-risk';
+            case 'HIGH': return 'high-risk';
+            case 'MEDIUM': return 'medium-risk';
+            default: return 'low-risk';
+        }
+    }
+    
+    getSeverityBadgeClass(severity) {
+        switch(severity) {
+            case 'CRITICAL': return 'bg-danger';
+            case 'HIGH': return 'bg-warning';
+            case 'MEDIUM': return 'bg-info';
+            default: return 'bg-secondary';
+        }
     }
 
     getConfidenceClass(confidence) {

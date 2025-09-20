@@ -10,30 +10,46 @@ A comprehensive web vulnerability scanner that leverages Large Language Models (
 - **Adaptive Payloads**: Generates context-aware payloads based on target URLs and discovered patterns
 - **Iterative Learning**: Continuously improves payload effectiveness based on scan results
 
-### 🔍 Comprehensive Vulnerability Testing
-- **SQL Injection**: Advanced SQL injection testing with multiple encoding methods
+### 🔍 Advanced Vulnerability Testing & Exploitation
+- **SQL Injection with Data Extraction**: 
+  - Database fingerprinting (MySQL, PostgreSQL, SQLite)
+  - Database name and table enumeration
+  - User credential extraction
+  - Automatic data dumping from common tables
+- **Local File Inclusion with File System Exploration**:
+  - Sensitive file extraction (/etc/passwd, shadow, config files)
+  - PHP wrapper exploitation
+  - Credential harvesting from configuration files
+  - Base64 encoded content decoding
 - **Cross-Site Scripting (XSS)**: Reflected, stored, and DOM-based XSS detection
-- **Local File Inclusion (LFI)**: File traversal and inclusion vulnerability testing
 - **Command Injection**: OS command injection with both direct and blind detection
 - **XXE Injection**: XML External Entity injection testing
-- **Smart URL Discovery**: Automatic internal URL and endpoint discovery
 
-### 🌐 Advanced Web Crawling
-- **Deep URL Discovery**: Recursive crawling to discover internal endpoints
-- **Form Detection**: Automatic detection and testing of web forms
-- **API Endpoint Discovery**: Identification of REST API endpoints
-- **Smart Parameter Detection**: Intelligent parameter name guessing
+### 🌐 Deep Web Crawling & Discovery
+- **Comprehensive URL Discovery**: 
+  - Recursive crawling with configurable depth (up to 3 levels)
+  - Common endpoint testing (admin, api, config, backup paths)
+  - JavaScript API endpoint extraction
+  - Form parameter discovery and mapping
+- **Smart Reconnaissance**:
+  - Hidden directory and file discovery
+  - API endpoint pattern recognition
+  - Configuration file detection (.env, .git, composer.json)
+  - Asset and resource mapping
 
-### 🎯 Intelligent Testing Methods
-- **Multi-Method Approach**: Tests vulnerabilities using different techniques
-- **Bypass Techniques**: Includes filter bypass methods and encoding variations
-- **Time-Based Detection**: Blind vulnerability detection using response timing
-- **Error-Based Detection**: Identifies vulnerabilities through error message analysis
+### 🎯 Intelligent Exploitation Engine
+- **Real Data Extraction**: Goes beyond detection to actually extract sensitive data
+- **Credential Harvesting**: Automatically extracts usernames, passwords, and API keys
+- **Database Enumeration**: Complete database structure mapping
+- **File System Exploration**: Comprehensive file system traversal and content extraction
+- **Severity-Based Classification**: CRITICAL, HIGH, MEDIUM, LOW severity levels
 
-### 💻 Modern Web Interface
+### 💻 Enhanced Web Interface
 - **Real-Time Dashboard**: Live scan progress and results
-- **Toggle Controls**: Easy enable/disable for different vulnerability types
-- **Interactive Results**: Detailed vulnerability reports with payloads and responses
+- **Critical Alert System**: Red highlighting for confirmed data extraction
+- **Data Visualization**: Extracted credentials, database content, and file contents
+- **Severity Indicators**: Color-coded vulnerability classification
+- **Interactive Results**: Expandable vulnerability details with extracted data
 - **Export Capabilities**: Save scan results for reporting
 
 ## Installation
