@@ -83,14 +83,56 @@ class VulnerabilityScanner {
             });
 
             if (response.ok) {
-                this.showAlert('Configuration saved successfully!', 'success');
-                this.updateStatusIndicator('configured', 'Configured');
+                const data = await response.json();
+                
+                // Clear previous results when new target is configured
+                this.clearResults();
+                this.clearUrls();
+                
+                // Reset counters
+                document.getElementById('urls-count').textContent = '0';
+                document.getElementById('vulns-count').textContent = '0';
+                document.getElementById('tests-count').textContent = '0';
+                
+                this.showAlert(`New target configured: ${targetUrl}`, 'success');
+                this.updateStatusIndicator('configured', `Ready - ${targetUrl}`);
+                
+                // Store current target for display
+                this.currentTarget = targetUrl;
+                this.updateTargetDisplay();
+                
             } else {
                 this.showAlert('Failed to save configuration', 'danger');
             }
         } catch (error) {
             console.error('Configuration error:', error);
             this.showAlert('Error saving configuration', 'danger');
+        }
+    }
+    
+    clearResults() {
+        const container = document.getElementById('results-container');
+        container.innerHTML = '<div class="text-muted text-center">No scan results for current target</div>';
+    }
+    
+    clearUrls() {
+        const urlsList = document.getElementById('urls-list');
+        urlsList.innerHTML = '<div class="text-muted text-center">No URLs discovered yet</div>';
+    }
+    
+    updateTargetDisplay() {
+        if (this.currentTarget) {
+            // Add target info to the navbar or create a target display
+            const navbar = document.querySelector('.navbar .container-fluid');
+            let targetDisplay = navbar.querySelector('.current-target');
+            
+            if (!targetDisplay) {
+                targetDisplay = document.createElement('div');
+                targetDisplay.className = 'current-target text-light me-3';
+                navbar.appendChild(targetDisplay);
+            }
+            
+            targetDisplay.innerHTML = `<small>Target: <strong>${this.currentTarget}</strong></small>`;
         }
     }
 
@@ -283,23 +325,54 @@ class VulnerabilityScanner {
         document.getElementById('tests-count').textContent = results.length;
         
         if (results.length === 0) {
-            container.innerHTML = '<div class="text-muted text-center">No scan results yet</div>';
+            container.innerHTML = `
+                <div class="text-center">
+                    <div class="text-muted">No scan results for current target</div>
+                    ${this.currentTarget ? `<small class="text-muted">Target: ${this.currentTarget}</small>` : ''}
+                </div>
+            `;
             return;
         }
 
-        // Count vulnerabilities
+        // Count vulnerabilities and critical findings
         const vulnerabilities = results.filter(r => r.is_vulnerable);
+        const criticalFindings = results.filter(r => r.data_extracted);
+        
         document.getElementById('vulns-count').textContent = vulnerabilities.length;
+        
+        // Show critical findings first
+        let html = '';
+        if (criticalFindings.length > 0) {
+            html += `
+                <div class="alert alert-danger mb-4">
+                    <h5><i class="fas fa-skull-crossbones"></i> CRITICAL FINDINGS - DATA EXTRACTED!</h5>
+                    <p class="mb-0">${criticalFindings.length} vulnerabilities with confirmed data extraction found!</p>
+                </div>
+            `;
+        }
 
         // Group results by vulnerability type
         const grouped = this.groupResultsByType(results);
         
-        container.innerHTML = Object.entries(grouped).map(([type, typeResults]) => `
-            <div class="mb-4">
-                <h6 class="text-uppercase fw-bold text-muted">${type.replace('_', ' ')}</h6>
-                ${typeResults.map(result => this.renderResult(result)).join('')}
-            </div>
-        `).join('');
+        html += Object.entries(grouped).map(([type, typeResults]) => {
+            const criticalCount = typeResults.filter(r => r.data_extracted).length;
+            const vulnCount = typeResults.filter(r => r.is_vulnerable).length;
+            
+            return `
+                <div class="mb-4">
+                    <h6 class="text-uppercase fw-bold text-muted d-flex justify-content-between align-items-center">
+                        ${type.replace('_', ' ')}
+                        <div>
+                            ${criticalCount > 0 ? `<span class="badge bg-danger me-1">${criticalCount} Critical</span>` : ''}
+                            ${vulnCount > 0 ? `<span class="badge bg-warning">${vulnCount} Vulnerable</span>` : ''}
+                        </div>
+                    </h6>
+                    ${typeResults.map(result => this.renderResult(result)).join('')}
+                </div>
+            `;
+        }).join('');
+        
+        container.innerHTML = html;
     }
 
     groupResultsByType(results) {
