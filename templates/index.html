@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM-Powered Vulnerability Scanner</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.1.3/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-dark">
+        <div class="container-fluid">
+            <span class="navbar-brand mb-0 h1">
+                <i class="fas fa-shield-alt"></i> LLM Vulnerability Scanner
+            </span>
+            <div class="navbar-nav">
+                <span class="nav-link" id="status-indicator">
+                    <i class="fas fa-circle text-secondary"></i> Ready
+                </span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-4">
+        <div class="row">
+            <!-- Configuration Panel -->
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header bg-primary text-white">
+                        <h5><i class="fas fa-cog"></i> Configuration</h5>
+                    </div>
+                    <div class="card-body">
+                        <form id="config-form">
+                            <div class="mb-3">
+                                <label for="target-url" class="form-label">Target URL</label>
+                                <input type="url" class="form-control" id="target-url" 
+                                       placeholder="http://localhost:3000" required>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="use-ollama">
+                                    <label class="form-check-label" for="use-ollama">
+                                        Use Ollama (Local)
+                                    </label>
+                                </div>
+                            </div>
+                            
+                            <div id="gemini-config" class="mb-3">
+                                <label for="api-key" class="form-label">Gemini API Key</label>
+                                <input type="password" class="form-control" id="api-key" 
+                                       placeholder="Enter your Gemini API key">
+                            </div>
+                            
+                            <div id="ollama-config" class="mb-3" style="display: none;">
+                                <label for="ollama-model" class="form-label">Ollama Model</label>
+                                <select class="form-select" id="ollama-model">
+                                    <option value="llama2">Llama 2</option>
+                                    <option value="codellama">Code Llama</option>
+                                    <option value="mistral">Mistral</option>
+                                    <option value="neural-chat">Neural Chat</option>
+                                </select>
+                            </div>
+                            
+                            <button type="submit" class="btn btn-primary w-100">
+                                <i class="fas fa-save"></i> Configure
+                            </button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Scan Configuration -->
+                <div class="card mt-3">
+                    <div class="card-header bg-success text-white">
+                        <h5><i class="fas fa-search"></i> Scan Configuration</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <h6>Vulnerability Types</h6>
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="sql-injection" checked>
+                                <label class="form-check-label" for="sql-injection">
+                                    SQL Injection
+                                </label>
+                            </div>
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="xss" checked>
+                                <label class="form-check-label" for="xss">
+                                    Cross-Site Scripting (XSS)
+                                </label>
+                            </div>
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="lfi" checked>
+                                <label class="form-check-label" for="lfi">
+                                    Local File Inclusion (LFI)
+                                </label>
+                            </div>
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="command-injection">
+                                <label class="form-check-label" for="command-injection">
+                                    Command Injection
+                                </label>
+                            </div>
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="xxe">
+                                <label class="form-check-label" for="xxe">
+                                    XXE Injection
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <button id="discover-urls" class="btn btn-info w-100 mb-2">
+                                <i class="fas fa-globe"></i> Discover URLs
+                            </button>
+                            <button id="start-scan" class="btn btn-success w-100">
+                                <i class="fas fa-play"></i> Start Comprehensive Scan
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Content -->
+            <div class="col-md-8">
+                <!-- Status Cards -->
+                <div class="row mb-4">
+                    <div class="col-md-4">
+                        <div class="card bg-info text-white">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between">
+                                    <div>
+                                        <h4 id="urls-count">0</h4>
+                                        <p class="mb-0">URLs Discovered</p>
+                                    </div>
+                                    <i class="fas fa-globe fa-2x"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card bg-warning text-white">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between">
+                                    <div>
+                                        <h4 id="vulns-count">0</h4>
+                                        <p class="mb-0">Vulnerabilities Found</p>
+                                    </div>
+                                    <i class="fas fa-exclamation-triangle fa-2x"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card bg-secondary text-white">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between">
+                                    <div>
+                                        <h4 id="tests-count">0</h4>
+                                        <p class="mb-0">Tests Performed</p>
+                                    </div>
+                                    <i class="fas fa-vial fa-2x"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Discovered URLs -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5><i class="fas fa-list"></i> Discovered URLs</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="urls-list" class="list-group">
+                            <div class="text-muted text-center">No URLs discovered yet</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Scan Results -->
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5><i class="fas fa-bug"></i> Vulnerability Results</h5>
+                        <button id="refresh-results" class="btn btn-sm btn-outline-primary">
+                            <i class="fas fa-refresh"></i> Refresh
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div id="results-container">
+                            <div class="text-muted text-center">No scan results yet</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Progress Modal -->
+    <div class="modal fade" id="progress-modal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Scanning in Progress</h5>
+                </div>
+                <div class="modal-body">
+                    <div class="progress mb-3">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                             role="progressbar" style="width: 100%"></div>
+                    </div>
+                    <p id="progress-text">Initializing scan...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.1.3/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

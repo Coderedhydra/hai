@@ -1,0 +1,351 @@
+body {
+    background-color: #f8f9fa;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.card {
+    border: none;
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+    border-radius: 0.5rem;
+}
+
+.card-header {
+    border-bottom: 1px solid rgba(0, 0, 0, 0.125);
+    border-radius: 0.5rem 0.5rem 0 0 !important;
+}
+
+.form-switch .form-check-input:checked {
+    background-color: #0d6efd;
+    border-color: #0d6efd;
+}
+
+.vulnerability-item {
+    border-left: 4px solid #dc3545;
+    background-color: #fff5f5;
+    margin-bottom: 1rem;
+    border-radius: 0.25rem;
+}
+
+.vulnerability-item.low-risk {
+    border-left-color: #ffc107;
+    background-color: #fffbf0;
+}
+
+.vulnerability-item.medium-risk {
+    border-left-color: #fd7e14;
+    background-color: #fff8f0;
+}
+
+.vulnerability-item.critical-risk {
+    border-left-color: #dc3545;
+    background-color: #ffe6e6;
+    border: 2px solid #dc3545 !important;
+    box-shadow: 0 0 15px rgba(220, 53, 69, 0.3);
+}
+
+.vulnerability-item.high-risk {
+    border-left-color: #dc3545;
+    background-color: #fff5f5;
+}
+
+.payload-code {
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 0.25rem;
+    padding: 0.5rem;
+    font-family: 'Courier New', monospace;
+    font-size: 0.875rem;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.url-item {
+    padding: 0.5rem 1rem;
+    border-bottom: 1px solid #dee2e6;
+    transition: background-color 0.2s;
+}
+
+.url-item:hover {
+    background-color: #f8f9fa;
+}
+
+.url-item:last-child {
+    border-bottom: none;
+}
+
+.status-badge {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+}
+
+.navbar-brand {
+    font-weight: 600;
+}
+
+#status-indicator {
+    font-size: 0.875rem;
+}
+
+.progress {
+    height: 0.5rem;
+}
+
+.btn {
+    border-radius: 0.375rem;
+    font-weight: 500;
+}
+
+.btn-sm {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
+}
+
+.text-truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.confidence-high {
+    color: #dc3545;
+    font-weight: bold;
+}
+
+.confidence-medium {
+    color: #fd7e14;
+    font-weight: 500;
+}
+
+.confidence-low {
+    color: #6c757d;
+}
+
+.scan-log {
+    max-height: 300px;
+    overflow-y: auto;
+    background-color: #000;
+    color: #00ff00;
+    font-family: 'Courier New', monospace;
+    padding: 1rem;
+    border-radius: 0.25rem;
+    font-size: 0.875rem;
+}
+
+.scan-log .log-entry {
+    margin-bottom: 0.25rem;
+}
+
+.scan-log .log-timestamp {
+    color: #888;
+}
+
+.scan-log .log-url {
+    color: #00aaff;
+}
+
+.scan-log .log-vuln {
+    color: #ff6666;
+    font-weight: bold;
+}
+
+.scan-log .log-success {
+    color: #00ff00;
+}
+
+.scan-log .log-error {
+    color: #ff4444;
+}
+
+.table-responsive {
+    border-radius: 0.5rem;
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+}
+
+.table th {
+    border-top: none;
+    font-weight: 600;
+    background-color: #f8f9fa;
+}
+
+.modal-content {
+    border: none;
+    border-radius: 0.5rem;
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+}
+
+.form-control:focus,
+.form-select:focus {
+    border-color: #0d6efd;
+    box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.25);
+}
+
+.alert {
+    border: none;
+    border-radius: 0.5rem;
+}
+
+.spinner-border-sm {
+    width: 1rem;
+    height: 1rem;
+}
+
+@keyframes pulse {
+    0% { 
+        opacity: 1; 
+        transform: scale(1);
+    }
+    50% { 
+        opacity: 0.7; 
+        transform: scale(1.05);
+    }
+    100% { 
+        opacity: 1; 
+        transform: scale(1);
+    }
+}
+
+.pulse {
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes critical-glow {
+    0% { box-shadow: 0 0 5px rgba(220, 53, 69, 0.3); }
+    50% { box-shadow: 0 0 20px rgba(220, 53, 69, 0.8); }
+    100% { box-shadow: 0 0 5px rgba(220, 53, 69, 0.3); }
+}
+
+.critical-vulnerability {
+    animation: critical-glow 2s infinite;
+}
+
+.bg-danger-subtle {
+    background-color: #f8d7da !important;
+}
+
+.text-danger-emphasis {
+    color: #a02834 !important;
+    font-weight: bold;
+}
+
+.border-danger-subtle {
+    border-color: #f1aeb5 !important;
+}
+
+.extracted-data-container {
+    background: linear-gradient(135deg, #fff5f5, #ffe6e6);
+    border: 2px dashed #dc3545;
+    border-radius: 8px;
+    padding: 15px;
+    margin: 10px 0;
+}
+
+.credential-highlight {
+    background-color: #dc3545;
+    color: white;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-weight: bold;
+}
+
+.file-content-preview {
+    background-color: #2d3748;
+    color: #e2e8f0;
+    padding: 10px;
+    border-radius: 6px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.85em;
+    max-height: 200px;
+    overflow-y: auto;
+    border-left: 4px solid #dc3545;
+}
+
+.vulnerability-badge {
+    font-size: 0.75em;
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.severity-critical {
+    background: linear-gradient(135deg, #dc3545, #c82333);
+    color: white;
+    border: 1px solid #b21e2f;
+}
+
+.severity-high {
+    background: linear-gradient(135deg, #fd7e14, #e55a00);
+    color: white;
+    border: 1px solid #cc4a00;
+}
+
+.severity-medium {
+    background: linear-gradient(135deg, #ffc107, #e0a800);
+    color: #212529;
+    border: 1px solid #d39e00;
+}
+
+.severity-low {
+    background: linear-gradient(135deg, #6c757d, #5a6268);
+    color: white;
+    border: 1px solid #545b62;
+}
+
+.data-extraction-alert {
+    background: linear-gradient(135deg, #dc3545, #c82333);
+    border: none;
+    color: white;
+    font-weight: bold;
+    box-shadow: 0 4px 8px rgba(220, 53, 69, 0.3);
+}
+
+.skull-icon {
+    animation: pulse 1s infinite;
+    filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.8));
+}
+
+.vulnerability-details {
+    font-size: 0.875rem;
+    color: #6c757d;
+}
+
+.vulnerability-details strong {
+    color: #495057;
+}
+
+.code-snippet {
+    background-color: #2d3748;
+    color: #e2e8f0;
+    padding: 1rem;
+    border-radius: 0.375rem;
+    font-family: 'Fira Code', 'Courier New', monospace;
+    font-size: 0.875rem;
+    overflow-x: auto;
+}
+
+.severity-critical {
+    background: linear-gradient(135deg, #dc3545, #c82333);
+    color: white;
+}
+
+.severity-high {
+    background: linear-gradient(135deg, #fd7e14, #e55a00);
+    color: white;
+}
+
+.severity-medium {
+    background: linear-gradient(135deg, #ffc107, #e0a800);
+    color: #212529;
+}
+
+.severity-low {
+    background: linear-gradient(135deg, #28a745, #1e7e34);
+    color: white;
+}
+
+.severity-info {
+    background: linear-gradient(135deg, #17a2b8, #138496);
+    color: white;
+}
