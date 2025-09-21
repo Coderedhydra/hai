@@ -5,7 +5,7 @@ A sophisticated, enterprise-grade web vulnerability scanner that leverages Large
 ## 🚀 Key Features
 
 ### 🤖 Advanced LLM Integration
-- **Automatic Model Detection**: Automatically discovers and configures local LLM models (Ollama, LM Studio, local APIs)
+- **Automatic Model Detection**: Automatically discovers and configures local LLM models (Ollama, LM Studio, local APIs). Ollama models are listed deterministically and include locally downloaded models even if the service is down (CLI fallback).
 - **Intelligent Payload Generation**: Context-aware payloads using advanced LLM prompting strategies
 - **Multiple Provider Support**: Gemini API, Ollama, LM Studio, and custom local API servers
 - **Fallback Mechanisms**: Graceful degradation when LLM services are unavailable
@@ -14,7 +14,7 @@ A sophisticated, enterprise-grade web vulnerability scanner that leverages Large
 - **Concurrent Scanning**: Multi-threaded scanning with intelligent resource management
 - **Advanced Payload Strategies**: Encoding, obfuscation, and bypass techniques
 - **Deep Exploitation**: Automatic data extraction and credential harvesting
-- **Comprehensive Testing**: SQL injection, XSS, LFI, command injection, XXE, and more
+- **Comprehensive Testing**: SQL injection, XSS, LFI, command injection, XXE, secrets exposure (API keys and tokens), and more
 
 ### 🛡️ Security & Monitoring
 - **Real-time Monitoring**: System health, performance metrics, and security event tracking
@@ -60,10 +60,10 @@ A sophisticated, enterprise-grade web vulnerability scanner that leverages Large
 
 ### 🌐 Deep Web Crawling & Discovery
 - **Comprehensive URL Discovery**: 
-  - Recursive crawling with configurable depth (up to 3 levels)
-  - Common endpoint testing (admin, api, config, backup paths)
-  - JavaScript API endpoint extraction
-  - Form parameter discovery and mapping
+  - Concurrent BFS crawling with configurable depth
+  - robots.txt and sitemap.xml awareness
+  - JavaScript link extraction (inline and external)
+  - Form action discovery and mapping
 - **Smart Reconnaissance**:
   - Hidden directory and file discovery
   - API endpoint pattern recognition
@@ -415,6 +415,14 @@ The scanner provides a comprehensive REST API for integration and automation:
 - `POST /api/export` - Export scan results
 - `GET /api/status` - Get real-time scanner status
 
+### New Features in this Release
+
+- Deterministic Ollama model enumeration with API and CLI fallback
+- Robust payload delivery with retries and rate-limiting
+- Improved URL discovery (robots/sitemap/JS parsing) and immediate persistence
+- Secrets detector for API keys and credentials exposure
+- Local repository code scanner and simple web search integration
+
 ### Example API Usage
 
 ```bash
@@ -662,7 +670,7 @@ This enhanced LLM-powered vulnerability scanner represents a significant advance
 ### 📈 **Usage Statistics**
 
 - **Supported LLM Providers**: 4 (Gemini, Ollama, LM Studio, Custom APIs)
-- **Vulnerability Types**: 5 (SQL Injection, XSS, LFI, Command Injection, XXE)
+- **Vulnerability Types**: 6 (SQL Injection, XSS, LFI, Command Injection, XXE, Secrets Exposure)
 - **Concurrent Threads**: Configurable (default: 5)
 - **API Endpoints**: 8 comprehensive REST endpoints
 - **Security Features**: 10+ protection mechanisms

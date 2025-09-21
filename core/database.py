@@ -138,6 +138,20 @@ class DatabaseManager:
 
             logger.info("Database initialized with optimized schema")
 
+    def save_discovered_url(self, scan_session_id: str, url: str, status_code: Optional[int] = None, title: Optional[str] = None) -> int:
+        """Save or update a discovered URL for a scan session."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT OR IGNORE INTO discovered_urls (scan_session_id, url, status_code, title)
+                    VALUES (?, ?, ?, ?)
+                ''', (scan_session_id, url, status_code, title))
+                return cursor.lastrowid or 0
+        except Exception as e:
+            logger.warning(f"Failed to save discovered URL {url}: {e}")
+            return -1
+
     def save_scan_result(self, result: Dict[str, Any], scan_session_id: Optional[str] = None) -> int:
         """Save scan result with enhanced metadata"""
         try:

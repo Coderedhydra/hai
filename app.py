@@ -12,6 +12,7 @@ import sys
 import json
 import time
 import logging
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Union
@@ -144,11 +145,24 @@ if FLASK_AVAILABLE and app:
         """Handle scanner configuration"""
         if request.method == 'GET':
             # Return current configuration
-            return jsonify({
-                'target_url': session.get('target_url', ''),
-                'available_models': llm_manager.detect_local_models(),
-                'security_status': security_manager.get_security_status()
-            })
+            try:
+                models = llm_manager.list_models(only_available=False)
+                return jsonify({
+                    'target_url': session.get('target_url', ''),
+                    'available_models': [
+                        {
+                            'name': m.name,
+                            'provider': m.provider.value,
+                            'is_available': m.is_available,
+                            'capabilities': m.capabilities
+                        }
+                        for m in models
+                    ],
+                    'security_status': security_manager.get_security_status()
+                })
+            except Exception as e:
+                logger.error(f"Error building config response: {e}")
+                return jsonify({'error': 'Failed to build config'}), 500
 
         # Handle POST request
         data = request.get_json()
@@ -173,9 +187,14 @@ if FLASK_AVAILABLE and app:
 
         # Create scan session
         scan_session_id = db_manager.create_scan_session(target_url)
+        session['scan_session_id'] = scan_session_id
 
-        # Generate CSRF token
-        csrf_token = security_manager.generate_csrf_token(session.sid)
+        # Ensure a stable client session id for CSRF
+        if 'client_session_id' not in session:
+            session['client_session_id'] = str(uuid.uuid4())
+
+        # Generate CSRF token using client session id
+        csrf_token = security_manager.generate_csrf_token(session['client_session_id'])
 
         logger.info(f"Configuration updated for target: {target_url}")
         return jsonify({
@@ -186,18 +205,18 @@ if FLASK_AVAILABLE and app:
 
     @app.route('/api/models', methods=['GET'])
     def get_available_models():
-        """Get available LLM models"""
+        """Get LLM models in deterministic order, including locally downloaded ones."""
         try:
-            models = llm_manager.detect_local_models()
+            models = llm_manager.list_models(only_available=False)
             return jsonify({
                 'models': [
                     {
-                        'name': name,
-                        'provider': model.provider.value,
-                        'is_available': model.is_available,
-                        'capabilities': model.capabilities
+                        'name': m.name,
+                        'provider': m.provider.value,
+                        'is_available': m.is_available,
+                        'capabilities': m.capabilities
                     }
-                    for name, model in models.items()
+                    for m in models
                 ]
             })
         except Exception as e:
@@ -220,19 +239,22 @@ if FLASK_AVAILABLE and app:
                 session['scan_session_id'] = scan_session_id
 
             # Discover URLs using scanner
-            urls = scanner.discover_urls(target_url)
+            urls = scanner.discover_urls(target_url, max_depth=config.get('max_url_depth', 3), scan_session_id=scan_session_id)
 
             # Store discovered URLs in database
             for url in urls:
-                db_manager.save_scan_result({
-                    'target_url': url,
-                    'vulnerability_type': 'URL_DISCOVERY',
-                    'payload': 'GET',
-                    'response_code': 200,
-                    'is_vulnerable': False,
-                    'confidence_score': 1.0,
-                    'severity': 'INFO'
-                }, scan_session_id)
+                try:
+                    db_manager.save_scan_result({
+                        'target_url': url,
+                        'vulnerability_type': 'URL_DISCOVERY',
+                        'payload': 'GET',
+                        'response_code': 200,
+                        'is_vulnerable': False,
+                        'confidence_score': 1.0,
+                        'severity': 'INFO'
+                    }, scan_session_id)
+                except Exception as e:
+                    logger.warning(f"Failed persisting discovered url {url}: {e}")
 
             return jsonify({'urls': urls, 'count': len(urls)})
 
@@ -252,11 +274,11 @@ if FLASK_AVAILABLE and app:
 
         # Validate CSRF token
         csrf_token = data.get('csrf_token')
-        if not security_manager.validate_csrf_token(csrf_token):
+        if not csrf_token or not security_manager.validate_csrf_token(csrf_token):
             return jsonify({'error': 'Invalid CSRF token'}), 403
 
         # Get scan configuration
-        scan_types = data.get('scan_types', ['sql_injection', 'xss', 'lfi', 'command_injection', 'xxe'])
+        scan_types = data.get('scan_types', ['sql_injection', 'xss', 'lfi', 'command_injection', 'xxe', 'secrets', 'ai_agent'])
         target_url = session['target_url']
         scan_session_id = session.get('scan_session_id')
 
@@ -347,15 +369,27 @@ if FLASK_AVAILABLE and app:
             'total_count': len(results)
         })
 
-    @app.route('/api/status', methods=['GET'])
-    def get_status():
-        """Get scanner status"""
-        return jsonify({
-            'system_health': monitoring_manager.get_system_health(),
-            'scan_statistics': monitoring_manager.get_scan_statistics(),
-            'security_status': security_manager.get_security_status(),
-            'available_models': len(llm_manager.detect_local_models())
-        })
+    if LIMITER_AVAILABLE and limiter:
+        @limiter.exempt
+        @app.route('/api/status', methods=['GET'])
+        def get_status():
+            """Get scanner status"""
+            return jsonify({
+                'system_health': monitoring_manager.get_system_health(),
+                'scan_statistics': monitoring_manager.get_scan_statistics(),
+                'security_status': security_manager.get_security_status(),
+                'available_models': len(llm_manager.detect_local_models())
+            })
+    else:
+        @app.route('/api/status', methods=['GET'])
+        def get_status():
+            """Get scanner status"""
+            return jsonify({
+                'system_health': monitoring_manager.get_system_health(),
+                'scan_statistics': monitoring_manager.get_scan_statistics(),
+                'security_status': security_manager.get_security_status(),
+                'available_models': len(llm_manager.detect_local_models())
+            })
 
     @app.route('/api/export', methods=['POST'])
     def export_results():
