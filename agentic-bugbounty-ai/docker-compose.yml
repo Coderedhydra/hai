@@ -1,0 +1,45 @@
+version: '3.9'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      - OPERATOR_TOKEN=dev-operator-token
+      - EVIDENCE_HMAC_KEY=dev-secret-please-change
+      - EVIDENCE_ENCRYPTION_KEY=
+      - AUTH_PUBLIC_KEY_BASE64=
+      - QUEUE_MANAGER_HOST=0.0.0.0
+      - QUEUE_MANAGER_PORT=5001
+      - QUEUE_MANAGER_AUTHKEY=devqueuekey
+      - CLAUDE_API_KEY=
+    ports:
+      - "8000:8000"
+      - "5001:5001"
+    volumes:
+      - evidence_data:/evidence
+      - reports_data:/reports
+    command: bash -lc "python -c 'import time; time.sleep(1)' && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    depends_on:
+      - backend
+    environment:
+      - QUEUE_MANAGER_HOST=backend
+      - QUEUE_MANAGER_PORT=5001
+      - QUEUE_MANAGER_AUTHKEY=devqueuekey
+      - EVIDENCE_HMAC_KEY=dev-secret-please-change
+      - EVIDENCE_ENCRYPTION_KEY=
+    volumes:
+      - evidence_data:/evidence
+      - reports_data:/reports
+    command: python -m app.workers.worker
+
+volumes:
+  evidence_data:
+  reports_data:
+
