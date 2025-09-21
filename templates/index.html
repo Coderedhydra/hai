@@ -54,13 +54,13 @@
                             </div>
                             
                             <div id="ollama-config" class="mb-3" style="display: none;">
-                                <label for="ollama-model" class="form-label">Ollama Model</label>
+                                <label for="ollama-model" class="form-label">Local LLM Model</label>
                                 <select class="form-select" id="ollama-model">
-                                    <option value="llama2">Llama 2</option>
-                                    <option value="codellama">Code Llama</option>
-                                    <option value="mistral">Mistral</option>
-                                    <option value="neural-chat">Neural Chat</option>
+                                    <option value="">Loading available models...</option>
                                 </select>
+                                <div id="model-status" class="form-text">
+                                    <i class="fas fa-spinner fa-spin"></i> Detecting local models...
+                                </div>
                             </div>
                             
                             <button type="submit" class="btn btn-primary w-100">

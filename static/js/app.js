@@ -7,6 +7,7 @@ class VulnerabilityScanner {
 
     init() {
         this.bindEvents();
+        this.loadAvailableModels(); // Load models on startup
         this.updateStatus();
         setInterval(() => this.updateStatus(), 5000); // Update status every 5 seconds
     }
@@ -42,13 +43,48 @@ class VulnerabilityScanner {
     toggleOllamaConfig(useOllama) {
         const geminiConfig = document.getElementById('gemini-config');
         const ollamaConfig = document.getElementById('ollama-config');
-        
+
         if (useOllama) {
             geminiConfig.style.display = 'none';
             ollamaConfig.style.display = 'block';
+            this.loadAvailableModels();
         } else {
             geminiConfig.style.display = 'block';
             ollamaConfig.style.display = 'none';
+        }
+    }
+
+    async loadAvailableModels() {
+        const modelSelect = document.getElementById('ollama-model');
+        const modelStatus = document.getElementById('model-status');
+
+        try {
+            const response = await fetch('/api/models');
+            const data = await response.json();
+
+            if (response.ok && data.models) {
+                modelSelect.innerHTML = '<option value="">Select a model...</option>';
+
+                data.models.forEach(model => {
+                    const option = document.createElement('option');
+                    option.value = `${model.provider}/${model.name}`;
+                    option.textContent = `${model.name} (${model.provider})`;
+                    option.title = `Provider: ${model.provider}, Available: ${model.is_available ? 'Yes' : 'No'}`;
+                    if (model.is_available) {
+                        option.selected = true;
+                    }
+                    modelSelect.appendChild(option);
+                });
+
+                modelStatus.innerHTML = `<i class="fas fa-check text-success"></i> Found ${data.models.length} models`;
+            } else {
+                modelSelect.innerHTML = '<option value="">No models available</option>';
+                modelStatus.innerHTML = '<i class="fas fa-exclamation-triangle text-warning"></i> No models detected';
+            }
+        } catch (error) {
+            console.error('Error loading models:', error);
+            modelSelect.innerHTML = '<option value="">Error loading models</option>';
+            modelStatus.innerHTML = '<i class="fas fa-times text-danger"></i> Failed to load models';
         }
     }
 
@@ -63,13 +99,26 @@ class VulnerabilityScanner {
             return;
         }
 
-        if (!useOllama && !apiKey) {
-            this.showAlert('Please enter a Gemini API key or enable Ollama', 'warning');
+        // Validate URL format
+        try {
+            new URL(targetUrl);
+        } catch {
+            this.showAlert('Please enter a valid URL', 'warning');
             return;
         }
 
+        if (!useOllama && !apiKey) {
+            this.showAlert('Please enter a Gemini API key or select a local model', 'warning');
+            return;
+        }
+
+        const configButton = document.querySelector('#config-form button[type="submit"]');
+        const originalText = configButton.innerHTML;
+        configButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Configuring...';
+        configButton.disabled = true;
+
         try {
-            const response = await fetch('/configure', {
+            const response = await fetch('/api/config', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -82,31 +131,39 @@ class VulnerabilityScanner {
                 })
             });
 
+            const data = await response.json();
+
             if (response.ok) {
-                const data = await response.json();
-                
-                // Clear previous results when new target is configured
+                // Store session information
+                this.currentTarget = targetUrl;
+                this.scanSessionId = data.session_id;
+                this.csrfToken = data.csrf_token;
+
+                // Update UI
                 this.clearResults();
                 this.clearUrls();
-                
+
                 // Reset counters
                 document.getElementById('urls-count').textContent = '0';
                 document.getElementById('vulns-count').textContent = '0';
                 document.getElementById('tests-count').textContent = '0';
-                
-                this.showAlert(`New target configured: ${targetUrl}`, 'success');
+
+                this.showAlert(`Configuration saved for ${targetUrl}`, 'success');
                 this.updateStatusIndicator('configured', `Ready - ${targetUrl}`);
-                
-                // Store current target for display
-                this.currentTarget = targetUrl;
                 this.updateTargetDisplay();
-                
+
+                // Load initial status
+                this.updateStatus();
+
             } else {
-                this.showAlert('Failed to save configuration', 'danger');
+                this.showAlert(data.error || 'Failed to save configuration', 'danger');
             }
         } catch (error) {
             console.error('Configuration error:', error);
             this.showAlert('Error saving configuration', 'danger');
+        } finally {
+            configButton.innerHTML = originalText;
+            configButton.disabled = false;
         }
     }
     
@@ -137,22 +194,39 @@ class VulnerabilityScanner {
     }
 
     async discoverUrls() {
+        if (!this.currentTarget) {
+            this.showAlert('Please configure a target first', 'warning');
+            return;
+        }
+
         const button = document.getElementById('discover-urls');
         const originalText = button.innerHTML;
-        
+
         button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Discovering...';
         button.disabled = true;
 
         try {
-            const response = await fetch('/discover_urls', {
-                method: 'POST'
+            const response = await fetch('/api/discover_urls', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    csrf_token: this.csrfToken
+                })
             });
 
             const data = await response.json();
-            
+
             if (response.ok) {
                 this.displayUrls(data.urls);
-                this.showAlert(`Discovered ${data.urls.length} URLs`, 'success');
+                document.getElementById('urls-count').textContent = data.count;
+                this.showAlert(`Discovered ${data.count} URLs`, 'success');
+
+                // Update session ID if provided
+                if (data.session_id) {
+                    this.scanSessionId = data.session_id;
+                }
             } else {
                 this.showAlert(data.error || 'Failed to discover URLs', 'danger');
             }
@@ -188,6 +262,11 @@ class VulnerabilityScanner {
             return;
         }
 
+        if (!this.currentTarget) {
+            this.showAlert('Please configure a target first', 'warning');
+            return;
+        }
+
         const scanTypes = this.getSelectedScanTypes();
         if (scanTypes.length === 0) {
             this.showAlert('Please select at least one vulnerability type', 'warning');
@@ -198,25 +277,29 @@ class VulnerabilityScanner {
         this.showProgressModal();
 
         const button = document.getElementById('start-scan');
-        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Scanning...';
+        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Starting Scan...';
         button.disabled = true;
 
         try {
-            const response = await fetch('/scan', {
+            const response = await fetch('/api/scan', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    scan_types: scanTypes
+                    scan_types: scanTypes,
+                    csrf_token: this.csrfToken,
+                    session_id: this.scanSessionId
                 })
             });
+
+            const data = await response.json();
 
             if (response.ok) {
                 this.updateStatusIndicator('scanning', 'Scanning...');
                 this.monitorScanProgress();
+                this.showAlert(data.message || 'Scan started successfully', 'success');
             } else {
-                const data = await response.json();
                 this.showAlert(data.error || 'Failed to start scan', 'danger');
             }
         } catch (error) {
@@ -224,11 +307,14 @@ class VulnerabilityScanner {
             this.showAlert('Error starting scan', 'danger');
         } finally {
             setTimeout(() => {
-                button.innerHTML = '<i class="fas fa-play"></i> Start Comprehensive Scan';
-                button.disabled = false;
-                this.isScanning = false;
-                this.progressModal.hide();
-            }, 30000); // Hide progress after 30 seconds
+                if (this.isScanning) {
+                    button.innerHTML = '<i class="fas fa-play"></i> Start Comprehensive Scan';
+                    button.disabled = false;
+                    this.isScanning = false;
+                    this.progressModal.hide();
+                    this.showAlert('Scan may still be running in the background', 'info');
+                }
+            }, 60000); // Hide progress after 60 seconds
         }
     }
 
@@ -295,26 +381,78 @@ class VulnerabilityScanner {
 
     async updateStatus() {
         try {
-            const response = await fetch('/status');
+            const response = await fetch('/api/status');
             const data = await response.json();
-            
-            document.getElementById('urls-count').textContent = data.discovered_urls_count || 0;
-            document.getElementById('vulns-count').textContent = data.vulnerabilities_found || 0;
-            
-            if (data.llm_configured) {
-                this.updateStatusIndicator('ready', 'Ready');
+
+            if (response.ok) {
+                // Update system health
+                const systemHealth = data.system_health;
+                if (systemHealth && systemHealth.status !== 'healthy') {
+                    this.showAlert(`System health: ${systemHealth.message}`, 'warning');
+                }
+
+                // Update scan statistics
+                const scanStats = data.scan_statistics;
+                if (scanStats) {
+                    document.getElementById('urls-count').textContent = scanStats.active_scans || 0;
+                    document.getElementById('vulns-count').textContent = scanStats.total_vulnerabilities || 0;
+                }
+
+                // Update status indicator
+                const availableModels = data.available_models || 0;
+                if (availableModels > 0) {
+                    this.updateStatusIndicator('ready', `Ready (${availableModels} models)`);
+                } else {
+                    this.updateStatusIndicator('warning', 'No models available');
+                }
+
+                // Update security status
+                const securityStatus = data.security_status;
+                if (securityStatus) {
+                    // Could add security status indicators to UI
+                    console.log('Security status:', securityStatus);
+                }
+            } else {
+                console.error('Error updating status:', data.error);
+                this.updateStatusIndicator('error', 'Status update failed');
             }
         } catch (error) {
             console.error('Status update error:', error);
+            this.updateStatusIndicator('error', 'Connection failed');
         }
     }
 
     async loadResults() {
+        if (!this.currentTarget) {
+            return;
+        }
+
         try {
-            const response = await fetch('/results');
+            const params = new URLSearchParams({
+                session_id: this.scanSessionId || '',
+                limit: '200',
+                offset: '0'
+            });
+
+            const response = await fetch(`/api/results?${params}`);
             const data = await response.json();
-            
-            this.displayResults(data.results);
+
+            if (response.ok) {
+                this.displayResults(data.results);
+                document.getElementById('tests-count').textContent = data.total_count || data.results.length;
+
+                // Update vulnerabilities count
+                const vulnerabilities = data.results.filter(r => r.is_vulnerable);
+                document.getElementById('vulns-count').textContent = vulnerabilities.length;
+
+                // Show critical findings count
+                const criticalFindings = data.results.filter(r => r.data_extracted);
+                if (criticalFindings.length > 0) {
+                    this.showAlert(`Found ${criticalFindings.length} critical vulnerabilities!`, 'danger');
+                }
+            } else {
+                console.error('Error loading results:', data.error);
+            }
         } catch (error) {
             console.error('Results loading error:', error);
         }
