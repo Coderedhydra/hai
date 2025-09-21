@@ -138,7 +138,7 @@ class LLMManager:
                                 'temperature': 0.3,
                                 'top_p': 0.9
                             }
-                        }, timeout=30
+                        }, timeout=60
                     )
                     if resp.status_code == 200:
                         return resp.json().get('response', '')
@@ -391,7 +391,7 @@ class LLMManager:
                                        'temperature': 0.7,
                                        'top_p': 0.9
                                    }
-                               }, timeout=30)
+                               }, timeout=60)
 
         if response.status_code == 200:
             result = response.json()

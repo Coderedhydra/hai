@@ -369,15 +369,27 @@ if FLASK_AVAILABLE and app:
             'total_count': len(results)
         })
 
-    @app.route('/api/status', methods=['GET'])
-    def get_status():
-        """Get scanner status"""
-        return jsonify({
-            'system_health': monitoring_manager.get_system_health(),
-            'scan_statistics': monitoring_manager.get_scan_statistics(),
-            'security_status': security_manager.get_security_status(),
-            'available_models': len(llm_manager.detect_local_models())
-        })
+    if LIMITER_AVAILABLE and limiter:
+        @limiter.exempt
+        @app.route('/api/status', methods=['GET'])
+        def get_status():
+            """Get scanner status"""
+            return jsonify({
+                'system_health': monitoring_manager.get_system_health(),
+                'scan_statistics': monitoring_manager.get_scan_statistics(),
+                'security_status': security_manager.get_security_status(),
+                'available_models': len(llm_manager.detect_local_models())
+            })
+    else:
+        @app.route('/api/status', methods=['GET'])
+        def get_status():
+            """Get scanner status"""
+            return jsonify({
+                'system_health': monitoring_manager.get_system_health(),
+                'scan_statistics': monitoring_manager.get_scan_statistics(),
+                'security_status': security_manager.get_security_status(),
+                'available_models': len(llm_manager.detect_local_models())
+            })
 
     @app.route('/api/export', methods=['POST'])
     def export_results():
