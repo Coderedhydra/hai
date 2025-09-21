@@ -1,56 +1,371 @@
+#!/usr/bin/env python3
+"""
+Enhanced LLM-Powered Vulnerability Scanner
+==========================================
+
+A sophisticated web vulnerability scanner that leverages Large Language Models (LLMs)
+to generate intelligent attack payloads and perform comprehensive security testing.
+"""
+
+import os
+import sys
+import json
+import time
+import logging
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Optional, Any, Union
+from dataclasses import dataclass, asdict
+from enum import Enum
+
 from flask import Flask, render_template, request, jsonify, session
+from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 import requests
 from bs4 import BeautifulSoup
 import urllib.parse
-import json
-import time
-import random
-import re
-from urllib.parse import urljoin, urlparse
-import threading
-from datetime import datetime
 import sqlite3
-import os
-from concurrent.futures import ThreadPoolExecutor
+import threading
+import asyncio
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import google.generativeai as genai
 
+# Add project root to path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# Import modular components
+from core.scanner import VulnerabilityScanner
+from core.database import DatabaseManager
+from core.llm_manager import LLMManager
+from core.config import ConfigManager
+from core.security import SecurityManager
+from core.monitoring import MonitoringManager
+from core.payload_manager import PayloadManager
+
+# Initialize Flask app
 app = Flask(__name__)
-app.secret_key = 'your-secret-key-change-this'
+app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
+CORS(app)
 
-# Initialize database
-def init_db():
-    conn = sqlite3.connect('scanner_results.db')
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS scan_results
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  timestamp TEXT,
-                  target_url TEXT,
-                  vulnerability_type TEXT,
-                  payload TEXT,
-                  response_code INTEGER,
-                  response_content TEXT,
-                  is_vulnerable BOOLEAN,
-                  confidence_score REAL,
-                  data_extracted BOOLEAN DEFAULT 0,
-                  extracted_data TEXT,
-                  severity TEXT DEFAULT 'LOW')''')
-    conn.commit()
-    conn.close()
+# Initialize rate limiter
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"]
+)
 
-init_db()
+# Initialize core components
+db_manager = DatabaseManager()
+config_manager = ConfigManager()
+security_manager = SecurityManager()
+monitoring_manager = MonitoringManager()
+llm_manager = LLMManager()
+payload_manager = PayloadManager()
 
-class VulnerabilityScanner:
-    def __init__(self):
-        self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+# Initialize global scanner instance
+scanner = VulnerabilityScanner(llm_manager, db_manager, monitoring_manager)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('scanner.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# Import the new modular scanner class
+from core.scanner import VulnerabilityScanner
+
+# Initialize Flask routes
+@app.route('/')
+def index():
+    """Main web interface"""
+    return render_template('index.html')
+
+@app.route('/api/config', methods=['GET', 'POST'])
+def handle_config():
+    """Handle scanner configuration"""
+    if request.method == 'GET':
+        # Return current configuration
+        return jsonify({
+            'target_url': session.get('target_url', ''),
+            'available_models': llm_manager.detect_local_models(),
+            'security_status': security_manager.get_security_status()
         })
-        self.discovered_urls = set()
-        self.vulnerabilities_found = []
-        self.llm_model = None
-        self.api_key = None
-        self.ollama_model = None
-        self.use_ollama = False
+
+    # Handle POST request
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid JSON data'}), 400
+
+    # Validate input
+    is_valid, errors = security_manager.validate_input(data)
+    if not is_valid:
+        return jsonify({'error': 'Input validation failed', 'details': errors}), 400
+
+    target_url = data.get('target_url')
+    if not target_url:
+        return jsonify({'error': 'Target URL is required'}), 400
+
+    # Validate target URL
+    if not security_manager._validate_url(target_url):
+        return jsonify({'error': 'Invalid target URL'}), 400
+
+    # Store configuration in session
+    session['target_url'] = target_url
+
+    # Create scan session
+    scan_session_id = db_manager.create_scan_session(target_url)
+
+    # Generate CSRF token
+    csrf_token = security_manager.generate_csrf_token(session.sid)
+
+    logger.info(f"Configuration updated for target: {target_url}")
+    return jsonify({
+        'status': 'configured',
+        'session_id': scan_session_id,
+        'csrf_token': csrf_token
+    })
+
+@app.route('/api/models', methods=['GET'])
+def get_available_models():
+    """Get available LLM models"""
+    try:
+        models = llm_manager.detect_local_models()
+        return jsonify({
+            'models': [
+                {
+                    'name': name,
+                    'provider': model.provider.value,
+                    'is_available': model.is_available,
+                    'capabilities': model.capabilities
+                }
+                for name, model in models.items()
+            ]
+        })
+    except Exception as e:
+        logger.error(f"Error detecting models: {e}")
+        return jsonify({'error': 'Failed to detect models'}), 500
+
+@app.route('/api/discover_urls', methods=['POST'])
+def discover_urls():
+    """Discover URLs from target website"""
+    if 'target_url' not in session:
+        return jsonify({'error': 'No target configured'}), 400
+
+    target_url = session['target_url']
+    scan_session_id = session.get('scan_session_id')
+
+    try:
+        # Start scan session if not exists
+        if not scan_session_id:
+            scan_session_id = db_manager.create_scan_session(target_url)
+            session['scan_session_id'] = scan_session_id
+
+        # Discover URLs using scanner
+        urls = scanner.discover_urls(target_url)
+
+        # Store discovered URLs in database
+        for url in urls:
+            db_manager.save_scan_result({
+                'target_url': url,
+                'vulnerability_type': 'URL_DISCOVERY',
+                'payload': 'GET',
+                'response_code': 200,
+                'is_vulnerable': False,
+                'confidence_score': 1.0,
+                'severity': 'INFO'
+            }, scan_session_id)
+
+        return jsonify({'urls': urls, 'count': len(urls)})
+
+    except Exception as e:
+        logger.error(f"Error discovering URLs: {e}")
+        return jsonify({'error': 'Failed to discover URLs'}), 500
+
+@app.route('/api/scan', methods=['POST'])
+def start_scan():
+    """Start vulnerability scan"""
+    if 'target_url' not in session:
+        return jsonify({'error': 'No target configured'}), 400
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid JSON data'}), 400
+
+    # Validate CSRF token
+    csrf_token = data.get('csrf_token')
+    if not security_manager.validate_csrf_token(csrf_token):
+        return jsonify({'error': 'Invalid CSRF token'}), 403
+
+    # Get scan configuration
+    scan_types = data.get('scan_types', ['sql_injection', 'xss', 'lfi', 'command_injection', 'xxe'])
+    target_url = session['target_url']
+    scan_session_id = session.get('scan_session_id')
+
+    try:
+        # Start monitoring
+        monitoring_manager.start_scan_monitoring(scan_session_id, target_url)
+
+        # Run scan in background thread
+        def run_scan():
+            try:
+                results = scanner.run_comprehensive_scan(target_url, scan_types, scan_session_id)
+                monitoring_manager.end_scan_monitoring(scan_session_id)
+
+                # Store results
+                for result in results:
+                    db_manager.save_scan_result(result, scan_session_id)
+
+                logger.info(f"Scan completed for {target_url}, found {len(results)} results")
+
+            except Exception as e:
+                logger.error(f"Scan failed for {target_url}: {e}")
+                monitoring_manager.log_security_event(
+                    'scan_error',
+                    {'target_url': target_url, 'error': str(e)},
+                    severity='HIGH'
+                )
+
+        import threading
+        scan_thread = threading.Thread(target=run_scan, daemon=True)
+        scan_thread.start()
+
+        return jsonify({
+            'status': 'started',
+            'session_id': scan_session_id,
+            'message': f'Scan started for {target_url}'
+        })
+
+    except Exception as e:
+        logger.error(f"Error starting scan: {e}")
+        return jsonify({'error': 'Failed to start scan'}), 500
+
+@app.route('/api/results', methods=['GET'])
+def get_results():
+    """Get scan results"""
+    target_url = session.get('target_url')
+    if not target_url:
+        return jsonify({'results': []})
+
+    scan_session_id = request.args.get('session_id')
+    limit = int(request.args.get('limit', 100))
+    offset = int(request.args.get('offset', 0))
+
+    filters = {}
+    if scan_session_id:
+        filters['scan_session_id'] = scan_session_id
+
+    # Add target domain filter
+    from urllib.parse import urlparse
+    parsed = urlparse(target_url)
+    target_domain = f"{parsed.scheme}://{parsed.netloc}"
+    filters['target_domain'] = target_domain
+
+    # Get results from database
+    results = db_manager.get_scan_results(filters, limit, offset)
+
+    # Format results for frontend
+    formatted_results = []
+    for result in results:
+        formatted_results.append({
+            'id': result['id'],
+            'timestamp': result['timestamp'],
+            'target_url': result['target_url'],
+            'vulnerability_type': result['vulnerability_type'],
+            'payload': security_manager.sanitize_payload(result['payload']),
+            'response_code': result['response_code'],
+            'response_content': result['response_content'][:200] + '...' if result['response_content'] and len(result['response_content']) > 200 else result['response_content'],
+            'is_vulnerable': result['is_vulnerable'],
+            'confidence_score': result['confidence_score'],
+            'data_extracted': result['data_extracted'],
+            'extracted_data': result.get('extracted_data'),
+            'severity': result['severity'],
+            'risk_score': result.get('risk_score', 0.0)
+        })
+
+    return jsonify({
+        'results': formatted_results,
+        'target_domain': target_domain,
+        'total_count': len(results)
+    })
+
+@app.route('/api/status', methods=['GET'])
+def get_status():
+    """Get scanner status"""
+    return jsonify({
+        'system_health': monitoring_manager.get_system_health(),
+        'scan_statistics': monitoring_manager.get_scan_statistics(),
+        'security_status': security_manager.get_security_status(),
+        'available_models': len(llm_manager.detect_local_models())
+    })
+
+@app.route('/api/export', methods=['POST'])
+def export_results():
+    """Export scan results"""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid JSON data'}), 400
+
+    format_type = data.get('format', 'json')
+    scan_session_id = data.get('session_id')
+
+    if not scan_session_id:
+        return jsonify({'error': 'Session ID required'}), 400
+
+    # Get results for session
+    results = db_manager.get_scan_results({'scan_session_id': scan_session_id})
+
+    if format_type == 'json':
+        return jsonify({'results': results})
+    else:
+        return jsonify({'error': 'Unsupported export format'}), 400
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Health check endpoint"""
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': time.time(),
+        'system_health': monitoring_manager.get_system_health(),
+        'database_status': 'connected' if db_manager else 'disconnected',
+        'models_available': len(llm_manager.detect_local_models()) > 0
+    })
+
+@app.errorhandler(429)
+def ratelimit_handler(e):
+    """Handle rate limit exceeded"""
+    return jsonify({'error': 'Rate limit exceeded'}), 429
+
+@app.errorhandler(500)
+def internal_error(e):
+    """Handle internal server errors"""
+    logger.error(f"Internal server error: {e}")
+    return jsonify({'error': 'Internal server error'}), 500
+
+if __name__ == '__main__':
+    # Validate configuration
+    errors = config.validate()
+    if errors:
+        logger.error("Configuration errors:")
+        for error in errors:
+            logger.error(f"  - {error}")
+        sys.exit(1)
+
+    # Initialize database
+    db_manager.init_database()
+
+    # Start the application
+    logger.info(f"Starting scanner on {config.get('host')}:{config.get('port')}")
+    app.run(
+        host=config.get('host'),
+        port=config.get('port'),
+        debug=config.get('debug')
+    )
         
     def configure_llm(self, api_key=None, ollama_model=None, use_ollama=False):
         self.api_key = api_key
