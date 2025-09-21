@@ -1,0 +1,115 @@
+# agentic-bugbounty-ai
+
+ONLY FOR AUTHORIZED, DEFENSIVE TESTING. This system does NOT include exploit payloads or destructive tests. Always obtain explicit written authorization before any active testing.
+
+## Quickstart
+
+Requirements: Docker, Docker Compose, Node 18+ (for frontend dev), Python 3.11+ (local dev).
+
+1) Build and run (dev):
+```
+docker-compose up --build
+```
+
+2) Generate a sample signed manifest (dev key):
+```
+docker compose exec backend python /app/scripts/sign_manifest.py --sample \
+  --key dev_signing_key --out /app/examples/sample_manifest.json
+```
+
+3) Start a passive scan:
+```
+curl -s -X POST http://localhost:8000/api/v1/scan \
+  -H 'Content-Type: application/json' \
+  -d @examples/example_scan_request.json
+```
+
+4) Approve active mode (simulated manual approval):
+```
+curl -s -X POST http://localhost:8000/api/v1/scan/<JOB_ID>/approve-active \
+  -H 'Content-Type: application/json' \
+  -H "X-OPERATOR-TOKEN: dev_operator_token" \
+  -d @examples/sample_manifest.json
+```
+
+5) Kill switch:
+```
+curl -s -X POST http://localhost:8000/api/v1/kill/<JOB_ID> -H "X-OPERATOR-TOKEN: dev_operator_token"
+```
+
+## Architecture (ASCII)
+
+```
+   +-----------+        +-----------------+        +------------------+
+   | Frontend  |  --->  | FastAPI Backend |  --->  | Evidence Storage |
+   | (React)   |        |  - Policy Guard |        |  (append-only)   |
+   +-----------+        |  - Orchestrator |        +------------------+
+         |              |  - Claude GW    |
+         v              |  - Ollama Intg  |        +------------------+
+   +-----------+        +-----------------+ <----> | LLMs (Ollama,    |
+   | Operator  |                                      |  Claude via GW) |
+   +-----------+                                      +------------------+
+```
+
+## Safety & Legal Checklist (MUST READ & ACCEPT)
+- You have explicit signed authorization for the exact targets and scopes.
+- Active testing requires signed manifest + manual operator approval.
+- Passive-only mode is the default; active features are disabled by default.
+- Rate limits are enforced globally and per-target; kill-switch is available.
+- All evidence is logged immutably and optionally encrypted.
+- Claude gateway redacts secrets and logs sanitized interactions.
+
+## Key Features
+- Safe, modular orchestrator with strict policy enforcement.
+- Local LLMs via Ollama; optional remote model via Claude gateway.
+- Passive crawler (stub) and header checker plugins (non-destructive).
+- Signed authorization manifests; CLI to sign and verify.
+- Append-only evidence logs with HMAC signatures and optional encryption.
+
+## Configuration
+Environment variables (see `backend/app/config.py`):
+- `SIGNING_KEY` (dev default: `dev_signing_key`) – HMAC for manifest and evidence.
+- `EVIDENCE_ENCRYPTION_KEY` (optional, Fernet key base64).
+- `OPERATOR_TOKEN` (dev default: `dev_operator_token`).
+- `GLOBAL_RATE_LIMIT_RPS` (default 2), `TARGET_RATE_LIMIT_RPS` (default 1).
+- `CLAUDE_API_KEY` (optional) – enabling Claude gateway; never logged.
+- `OLLAMA_HOST` (default `http://localhost:11434`).
+
+## Dev Commands
+- Backend (local):
+```
+cd backend
+pip install -r requirements.txt
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+- Frontend (local):
+```
+cd frontend
+npm install
+npm run dev
+```
+
+## Extending with Plugins
+See `backend/app/plugins/header_checker.py` for a safe plugin example.
+
+Plugin contract:
+```
+metadata = {
+  'name': 'header_checker',
+  'safe_default': True,
+  'required_manifest_scopes': []
+}
+
+async def run(task, http_client, evidence_store):
+  # Implement safe, passive checks only
+  return { 'findings': [] }
+```
+
+## Non-Actionable Reminder
+ONLY FOR AUTHORIZED, DEFENSIVE TESTING. The system does NOT implement or contain exploit payloads; it is intended for discovery, triage, and safe active-check orchestration.
+
+---
+
+See `docs/SAFE_USAGE.md` and `docs/PROMPTS.md` for details.
+
