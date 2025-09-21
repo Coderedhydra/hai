@@ -12,6 +12,7 @@ import sys
 import json
 import time
 import logging
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Union
@@ -144,11 +145,24 @@ if FLASK_AVAILABLE and app:
         """Handle scanner configuration"""
         if request.method == 'GET':
             # Return current configuration
-            return jsonify({
-                'target_url': session.get('target_url', ''),
-                'available_models': llm_manager.detect_local_models(),
-                'security_status': security_manager.get_security_status()
-            })
+            try:
+                models = llm_manager.list_models(only_available=False)
+                return jsonify({
+                    'target_url': session.get('target_url', ''),
+                    'available_models': [
+                        {
+                            'name': m.name,
+                            'provider': m.provider.value,
+                            'is_available': m.is_available,
+                            'capabilities': m.capabilities
+                        }
+                        for m in models
+                    ],
+                    'security_status': security_manager.get_security_status()
+                })
+            except Exception as e:
+                logger.error(f"Error building config response: {e}")
+                return jsonify({'error': 'Failed to build config'}), 500
 
         # Handle POST request
         data = request.get_json()
@@ -173,9 +187,14 @@ if FLASK_AVAILABLE and app:
 
         # Create scan session
         scan_session_id = db_manager.create_scan_session(target_url)
+        session['scan_session_id'] = scan_session_id
 
-        # Generate CSRF token
-        csrf_token = security_manager.generate_csrf_token(session.sid)
+        # Ensure a stable client session id for CSRF
+        if 'client_session_id' not in session:
+            session['client_session_id'] = str(uuid.uuid4())
+
+        # Generate CSRF token using client session id
+        csrf_token = security_manager.generate_csrf_token(session['client_session_id'])
 
         logger.info(f"Configuration updated for target: {target_url}")
         return jsonify({
@@ -224,15 +243,18 @@ if FLASK_AVAILABLE and app:
 
             # Store discovered URLs in database
             for url in urls:
-                db_manager.save_scan_result({
-                    'target_url': url,
-                    'vulnerability_type': 'URL_DISCOVERY',
-                    'payload': 'GET',
-                    'response_code': 200,
-                    'is_vulnerable': False,
-                    'confidence_score': 1.0,
-                    'severity': 'INFO'
-                }, scan_session_id)
+                try:
+                    db_manager.save_scan_result({
+                        'target_url': url,
+                        'vulnerability_type': 'URL_DISCOVERY',
+                        'payload': 'GET',
+                        'response_code': 200,
+                        'is_vulnerable': False,
+                        'confidence_score': 1.0,
+                        'severity': 'INFO'
+                    }, scan_session_id)
+                except Exception as e:
+                    logger.warning(f"Failed persisting discovered url {url}: {e}")
 
             return jsonify({'urls': urls, 'count': len(urls)})
 
@@ -252,7 +274,7 @@ if FLASK_AVAILABLE and app:
 
         # Validate CSRF token
         csrf_token = data.get('csrf_token')
-        if not security_manager.validate_csrf_token(csrf_token):
+        if not csrf_token or not security_manager.validate_csrf_token(csrf_token):
             return jsonify({'error': 'Invalid CSRF token'}), 403
 
         # Get scan configuration
