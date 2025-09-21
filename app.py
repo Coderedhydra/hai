@@ -29,7 +29,30 @@ import sqlite3
 import threading
 import asyncio
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import google.generativeai as genai
+
+# Optional imports
+try:
+    import google.generativeai as genai
+    GENAI_AVAILABLE = True
+except ImportError:
+    GENAI_AVAILABLE = False
+    print("Google Generative AI not available - Gemini API features will be limited")
+
+# Optional Flask extensions
+try:
+    from flask_cors import CORS
+    CORS_AVAILABLE = True
+except ImportError:
+    CORS_AVAILABLE = False
+    print("Flask-CORS not available - CORS support will be limited")
+
+try:
+    from flask_limiter import Limiter
+    from flask_limiter.util import get_remote_address
+    LIMITER_AVAILABLE = True
+except ImportError:
+    LIMITER_AVAILABLE = False
+    print("Flask-Limiter not available - rate limiting will be disabled")
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -46,14 +69,25 @@ from core.payload_manager import PayloadManager
 # Initialize Flask app
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
-CORS(app)
 
-# Initialize rate limiter
-limiter = Limiter(
-    app=app,
-    key_func=get_remote_address,
-    default_limits=["200 per day", "50 per hour"]
-)
+# Initialize CORS if available
+if CORS_AVAILABLE:
+    CORS(app)
+    print("✅ CORS support enabled")
+else:
+    print("⚠️ CORS support disabled")
+
+# Initialize rate limiter if available
+if LIMITER_AVAILABLE:
+    limiter = Limiter(
+        app=app,
+        key_func=get_remote_address,
+        default_limits=["200 per day", "50 per hour"]
+    )
+    print("✅ Rate limiting enabled")
+else:
+    print("⚠️ Rate limiting disabled")
+    limiter = None
 
 # Initialize core components
 db_manager = DatabaseManager()
@@ -339,7 +373,11 @@ def health_check():
 @app.errorhandler(429)
 def ratelimit_handler(e):
     """Handle rate limit exceeded"""
-    return jsonify({'error': 'Rate limit exceeded'}), 429
+    if limiter:
+        return jsonify({'error': 'Rate limit exceeded'}), 429
+    else:
+        # Fallback if limiter is not available
+        return jsonify({'error': 'Too many requests'}), 429
 
 @app.errorhandler(500)
 def internal_error(e):

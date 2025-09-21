@@ -8,7 +8,6 @@ Includes performance monitoring, security event tracking, and system health chec
 """
 
 import time
-import psutil
 import threading
 from typing import Dict, List, Optional, Any, Callable
 from dataclasses import dataclass, field
@@ -18,6 +17,14 @@ import json
 import os
 
 logger = logging.getLogger(__name__)
+
+# Optional psutil import for system monitoring
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+    logger.warning("psutil not available - system monitoring features will be limited")
 
 @dataclass
 class SystemMetrics:
@@ -82,16 +89,29 @@ class MonitoringManager:
         def monitor_system():
             while True:
                 try:
-                    metrics = SystemMetrics(
-                        timestamp=time.time(),
-                        cpu_percent=psutil.cpu_percent(interval=1),
-                        memory_percent=psutil.virtual_memory().percent,
-                        disk_usage_percent=psutil.disk_usage('/').percent,
-                        network_connections=len(psutil.net_connections()),
-                        open_files=len(psutil.Process().open_files()),
-                        thread_count=threading.active_count(),
-                        scan_queue_size=len(self.active_scans)
-                    )
+                    if PSUTIL_AVAILABLE:
+                        metrics = SystemMetrics(
+                            timestamp=time.time(),
+                            cpu_percent=psutil.cpu_percent(interval=1),
+                            memory_percent=psutil.virtual_memory().percent,
+                            disk_usage_percent=psutil.disk_usage('/').percent,
+                            network_connections=len(psutil.net_connections()),
+                            open_files=len(psutil.Process().open_files()),
+                            thread_count=threading.active_count(),
+                            scan_queue_size=len(self.active_scans)
+                        )
+                    else:
+                        # Limited metrics without psutil
+                        metrics = SystemMetrics(
+                            timestamp=time.time(),
+                            cpu_percent=0.0,  # Cannot measure without psutil
+                            memory_percent=0.0,  # Cannot measure without psutil
+                            disk_usage_percent=0.0,  # Cannot measure without psutil
+                            network_connections=0,  # Cannot measure without psutil
+                            open_files=0,  # Cannot measure without psutil
+                            thread_count=threading.active_count(),
+                            scan_queue_size=len(self.active_scans)
+                        )
 
                     self.system_metrics.append(metrics)
 
@@ -147,7 +167,7 @@ class MonitoringManager:
 
         duration = metrics.end_time - metrics.start_time
 
-        logger.info(f"Scan session {session_id} completed in {duration".2f"}s")
+        logger.info(f"Scan session {session_id} completed in {duration:.2f}s")
         logger.info(f"Requests: {metrics.total_requests}, Vulnerabilities: {metrics.vulnerabilities_found}, Critical: {metrics.critical_findings}")
 
         # Remove from active scans
@@ -203,11 +223,11 @@ class MonitoringManager:
             status = 'unhealthy'
             issues = []
             if cpu_high:
-                issues.append(f"High CPU usage: {latest.cpu_percent".1f"}%")
+                issues.append(f"High CPU usage: {latest.cpu_percent:.1f}%")
             if memory_high:
-                issues.append(f"High memory usage: {latest.memory_percent".1f"}%")
+                issues.append(f"High memory usage: {latest.memory_percent:.1f}%")
             if disk_high:
-                issues.append(f"High disk usage: {latest.disk_usage_percent".1f"}%")
+                issues.append(f"High disk usage: {latest.disk_usage_percent:.1f}%")
             message = ', '.join(issues)
         else:
             status = 'healthy'
@@ -347,7 +367,7 @@ class MonitoringManager:
         if stats['total_requests'] > 0:
             error_rate = stats['total_errors'] / stats['total_requests']
             if error_rate > 0.1:  # 10% error rate
-                alerts.append(f"High error rate: {error_rate".1%"}")
+                alerts.append(f"High error rate: {error_rate:.1%}")
 
         return alerts
 

@@ -13,7 +13,6 @@ Intelligent management of Large Language Models including:
 import os
 import json
 import time
-import requests
 import subprocess
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
@@ -24,6 +23,14 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
+
+# Optional requests import for HTTP operations
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
+    logger.warning("requests not available - HTTP-based LLM operations will be limited")
 
 class LLMProvider(Enum):
     """Supported LLM providers"""
@@ -93,6 +100,10 @@ class LLMManager:
 
     def _detect_ollama_models(self) -> None:
         """Detect Ollama models"""
+        if not REQUESTS_AVAILABLE:
+            logger.warning("Cannot detect Ollama models - requests not available")
+            return
+
         try:
             # Check if Ollama is running
             response = requests.get('http://localhost:11434/api/tags', timeout=5)
@@ -115,6 +126,10 @@ class LLMManager:
 
     def _detect_lm_studio_models(self) -> None:
         """Detect LM Studio models"""
+        if not REQUESTS_AVAILABLE:
+            logger.warning("Cannot detect LM Studio models - requests not available")
+            return
+
         common_ports = [1234, 5000, 8000, 8080]
 
         for port in common_ports:
@@ -141,6 +156,10 @@ class LLMManager:
 
     def _detect_local_api_servers(self) -> None:
         """Detect other local API servers"""
+        if not REQUESTS_AVAILABLE:
+            logger.warning("Cannot detect local API servers - requests not available")
+            return
+
         common_ports = [8001, 8081, 5001]
 
         for port in common_ports:
@@ -219,6 +238,9 @@ class LLMManager:
     def _generate_ollama_payloads(self, model: LLMModel, vulnerability_type: str,
                                 target_url: str, context: str) -> List[str]:
         """Generate payloads using Ollama"""
+        if not REQUESTS_AVAILABLE:
+            return self._get_default_payloads(vulnerability_type)
+
         prompt = self._create_payload_prompt(vulnerability_type, target_url, context)
 
         response = requests.post(f'{model.base_url}/api/generate',
@@ -237,11 +259,14 @@ class LLMManager:
             payloads = [p.strip() for p in result['response'].split('\n') if p.strip()]
             return payloads
 
-        raise Exception(f"Ollama API returned status {response.status_code}")
+        return self._get_default_payloads(vulnerability_type)
 
     def _generate_lm_studio_payloads(self, model: LLMModel, vulnerability_type: str,
                                    target_url: str, context: str) -> List[str]:
         """Generate payloads using LM Studio"""
+        if not REQUESTS_AVAILABLE:
+            return self._get_default_payloads(vulnerability_type)
+
         prompt = self._create_payload_prompt(vulnerability_type, target_url, context)
 
         response = requests.post(f'{model.base_url}/v1/completions',
@@ -259,11 +284,14 @@ class LLMManager:
             payloads = [p.strip() for p in generated_text.split('\n') if p.strip()]
             return payloads
 
-        raise Exception(f"LM Studio API returned status {response.status_code}")
+        return self._get_default_payloads(vulnerability_type)
 
     def _generate_local_api_payloads(self, model: LLMModel, vulnerability_type: str,
                                    target_url: str, context: str) -> List[str]:
         """Generate payloads using generic local API"""
+        if not REQUESTS_AVAILABLE:
+            return self._get_default_payloads(vulnerability_type)
+
         prompt = self._create_payload_prompt(vulnerability_type, target_url, context)
 
         response = requests.post(f'{model.base_url}/v1/completions',
@@ -279,7 +307,7 @@ class LLMManager:
             payloads = [p.strip() for p in generated_text.split('\n') if p.strip()]
             return payloads
 
-        raise Exception(f"Local API returned status {response.status_code}")
+        return self._get_default_payloads(vulnerability_type)
 
     def _create_payload_prompt(self, vulnerability_type: str, target_url: str, context: str) -> str:
         """Create intelligent prompt for payload generation"""
