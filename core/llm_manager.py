@@ -114,6 +114,94 @@ class LLMManager:
         models.sort(key=lambda m: (m.provider.value, m.name.lower()))
         return models
 
+    def complete_text(self, prompt: str, model_name: Optional[str] = None, max_tokens: int = 800) -> str:
+        """General-purpose text completion using available local models."""
+        if not REQUESTS_AVAILABLE:
+            return ""
+
+        available_models = self.detect_local_models()
+        if not available_models:
+            return ""
+
+        for key, model in available_models.items():
+            if model_name and key != model_name:
+                continue
+            try:
+                if model.provider == LLMProvider.OLLAMA:
+                    resp = requests.post(
+                        f"{model.base_url}/api/generate",
+                        json={
+                            'model': model.name,
+                            'prompt': prompt,
+                            'stream': False,
+                            'options': {
+                                'temperature': 0.3,
+                                'top_p': 0.9
+                            }
+                        }, timeout=30
+                    )
+                    if resp.status_code == 200:
+                        return resp.json().get('response', '')
+                elif model.provider == LLMProvider.LM_STUDIO:
+                    resp = requests.post(
+                        f"{model.base_url}/v1/completions",
+                        json={
+                            'model': model.name,
+                            'prompt': prompt,
+                            'max_tokens': max_tokens,
+                            'temperature': 0.3,
+                            'top_p': 0.9
+                        }, timeout=30
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        return data.get('choices', [{}])[0].get('text', '')
+                elif model.provider == LLMProvider.LOCAL_API:
+                    resp = requests.post(
+                        f"{model.base_url}/v1/completions",
+                        json={
+                            'prompt': prompt,
+                            'max_tokens': max_tokens,
+                            'temperature': 0.3
+                        }, timeout=30
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        return data.get('text', data.get('response', ''))
+            except Exception:
+                continue
+
+        return ""
+
+    def complete_json(self, prompt: str, model_name: Optional[str] = None, max_tokens: int = 800) -> Optional[Any]:
+        """Request a JSON plan from the model and parse it safely."""
+        json_prompt = (
+            "You are a security testing planner. "
+            "Respond ONLY with a JSON array of actions. Each action must be an object with: "
+            "url (string), method (GET|POST), params (array of strings), vulnerabilities (array of strings), headers (object).\n\n"
+            f"Context:\n{prompt}\n\nReturn ONLY valid JSON without explanation."
+        )
+        text = self.complete_text(json_prompt, model_name=model_name, max_tokens=max_tokens)
+        if not text:
+            return None
+        try:
+            # Extract JSON if surrounded by text
+            start = text.find('{')
+            start_arr = text.find('[')
+            if start == -1 or (start_arr != -1 and start_arr < start):
+                start = start_arr
+            end = text.rfind(']')
+            end_obj = text.rfind('}')
+            if end_obj != -1 and (end == -1 or end_obj > end):
+                end = end_obj
+            if start != -1 and end != -1 and end > start:
+                snippet = text[start:end+1]
+            else:
+                snippet = text
+            return json.loads(snippet)
+        except Exception:
+            return None
+
     def _detect_ollama_models(self) -> None:
         """Detect Ollama models"""
         if not REQUESTS_AVAILABLE:

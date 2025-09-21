@@ -278,7 +278,7 @@ if FLASK_AVAILABLE and app:
             return jsonify({'error': 'Invalid CSRF token'}), 403
 
         # Get scan configuration
-        scan_types = data.get('scan_types', ['sql_injection', 'xss', 'lfi', 'command_injection', 'xxe', 'secrets'])
+        scan_types = data.get('scan_types', ['sql_injection', 'xss', 'lfi', 'command_injection', 'xxe', 'secrets', 'ai_agent'])
         target_url = session['target_url']
         scan_session_id = session.get('scan_session_id')
 

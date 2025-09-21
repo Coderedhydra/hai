@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 import queue
 import re
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -244,6 +245,8 @@ class VulnerabilityScanner:
                 return self._test_xxe(url, scan_session_id)
             elif scan_type == 'secrets':
                 return self._test_secrets_exposure(url, scan_session_id)
+            elif scan_type == 'ai_agent':
+                return self._run_ai_agent(url, scan_session_id)
             else:
                 logger.warning(f"Unknown scan type: {scan_type}")
                 return []
@@ -646,3 +649,95 @@ class VulnerabilityScanner:
         except Exception as e:
             logger.error(f"Error testing secrets exposure on {url}: {e}")
         return results
+
+    def _run_ai_agent(self, base_url: str, scan_session_id: str) -> List[Dict[str, Any]]:
+        """LLM-driven planning and execution: decide endpoints, params, and next steps."""
+        results: List[Dict[str, Any]] = []
+        try:
+            urls = list(self.discovered_urls) or [base_url]
+            param_hints = self._extract_parameter_hints(urls)
+
+            context = {
+                'base_url': base_url,
+                'urls': urls[:200],
+                'param_hints': param_hints
+            }
+
+            prompt = (
+                "Given the following target context, produce a prioritized plan of HTTP tests to run.\n"
+                "Focus on parameters to test and vulnerability classes (sql_injection,xss,lfi,command_injection,xxe,secrets).\n"
+                "Prefer internal endpoints and forms. Limit to 25 actions.\n\n"
+                f"{json.dumps(context)}"
+            )
+
+            plan = self.llm_manager.complete_json(prompt)
+            if not isinstance(plan, list):
+                return results
+
+            for action in plan[:25]:
+                try:
+                    url = action.get('url') or base_url
+                    method = (action.get('method') or 'GET').upper()
+                    headers = action.get('headers') or {}
+                    vulns = action.get('vulnerabilities') or []
+
+                    combined_results: List[Dict[str, Any]] = []
+                    for v in vulns:
+                        if v in ['sql_injection', 'xss', 'lfi', 'command_injection', 'xxe']:
+                            if v == 'sql_injection':
+                                combined_results.extend(self._test_sql_injection(url, scan_session_id))
+                            elif v == 'xss':
+                                combined_results.extend(self._test_xss(url, scan_session_id))
+                            elif v == 'lfi':
+                                combined_results.extend(self._test_lfi(url, scan_session_id))
+                            elif v == 'command_injection':
+                                combined_results.extend(self._test_command_injection(url, scan_session_id))
+                            elif v == 'xxe':
+                                combined_results.extend(self._test_xxe(url, scan_session_id))
+                        elif v == 'secrets':
+                            combined_results.extend(self._test_secrets_exposure(url, scan_session_id))
+
+                    if not combined_results:
+                        try:
+                            if method == 'GET':
+                                resp = self._request_with_retries('GET', url, headers=headers, timeout=10)
+                            else:
+                                resp = self._request_with_retries('POST', url, headers=headers, data={}, timeout=10)
+                            results.append({
+                                'target_url': url,
+                                'vulnerability_type': 'AI_AGENT_PROBE',
+                                'payload': method,
+                                'response_code': getattr(resp, 'status_code', None),
+                                'response_content': None,
+                                'is_vulnerable': False,
+                                'confidence_score': 0.2,
+                                'data_extracted': False,
+                                'severity': 'INFO'
+                            })
+                        except Exception:
+                            pass
+                    else:
+                        results.extend(combined_results)
+
+                    time.sleep(self._rate_limit_delay)
+
+                except Exception:
+                    continue
+
+        except Exception as e:
+            logger.error(f"AI agent execution error: {e}")
+
+        return results
+
+    def _extract_parameter_hints(self, urls: List[str]) -> Dict[str, List[str]]:
+        """Extract candidate parameter names from URLs."""
+        hints: Dict[str, List[str]] = {}
+        for u in urls:
+            try:
+                parsed = urllib.parse.urlparse(u)
+                q = urllib.parse.parse_qs(parsed.query)
+                if q:
+                    hints[u] = list(q.keys())[:10]
+            except Exception:
+                continue
+        return hints
