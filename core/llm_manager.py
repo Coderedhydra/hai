@@ -66,6 +66,7 @@ class LLMManager:
         self._detection_lock = threading.Lock()
         self._last_detection = 0
         self._detection_interval = 300  # 5 minutes
+        self._ollama_base_url = os.environ.get('OLLAMA_BASE_URL', 'http://localhost:11434')
 
     def detect_local_models(self) -> Dict[str, LLMModel]:
         """Automatically detect all available local LLM models"""
@@ -80,8 +81,10 @@ class LLMManager:
 
             self.models.clear()
 
-            # Detect Ollama models
+            # Detect Ollama models (downloaded + availability)
             self._detect_ollama_models()
+            # Fallback to CLI enumeration to ensure listing of downloaded models
+            self._detect_ollama_models_cli()
 
             # Detect LM Studio models
             self._detect_lm_studio_models()
@@ -98,6 +101,19 @@ class LLMManager:
             logger.info(f"Model detection completed. Found {len(available_models)} available models")
             return available_models
 
+    def list_models(self, provider: Optional[LLMProvider] = None, only_available: bool = False) -> List[LLMModel]:
+        """Return models in deterministic order (provider, name)."""
+        # Ensure cache is warmed
+        _ = self.detect_local_models()
+        models = list(self.models.values())
+        if provider:
+            models = [m for m in models if m.provider == provider]
+        if only_available:
+            models = [m for m in models if m.is_available]
+        # Deterministic ordering
+        models.sort(key=lambda m: (m.provider.value, m.name.lower()))
+        return models
+
     def _detect_ollama_models(self) -> None:
         """Detect Ollama models"""
         if not REQUESTS_AVAILABLE:
@@ -106,23 +122,58 @@ class LLMManager:
 
         try:
             # Check if Ollama is running
-            response = requests.get('http://localhost:11434/api/tags', timeout=5)
+            response = requests.get(f'{self._ollama_base_url}/api/tags', timeout=5)
             if response.status_code == 200:
                 models_data = response.json()
+                count_before = len(self.models)
                 for model in models_data.get('models', []):
                     model_name = model.get('name', '')
                     if model_name:
-                        self.models[f"ollama/{model_name}"] = LLMModel(
+                        key = f"ollama/{model_name}"
+                        self.models[key] = LLMModel(
                             name=model_name,
                             provider=LLMProvider.OLLAMA,
-                            base_url='http://localhost:11434',
+                            base_url=self._ollama_base_url,
                             is_available=True,
                             last_checked=time.time(),
                             capabilities=['payload_generation', 'code_analysis', 'text_generation']
                         )
-                logger.info(f"Detected {len(self.models)} Ollama models")
+                logger.info(f"Detected {len(self.models) - count_before} Ollama models via API")
         except Exception as e:
             logger.warning(f"Ollama detection failed: {e}")
+
+    def _detect_ollama_models_cli(self) -> None:
+        """Detect locally downloaded Ollama models via CLI to ensure complete listing."""
+        try:
+            result = subprocess.run(['ollama', 'list'], capture_output=True, text=True, timeout=5)
+            if result.returncode != 0 or not result.stdout.strip():
+                return
+            lines = [line for line in result.stdout.strip().split('\n') if line.strip()]
+            # Skip header if present (e.g., 'NAME  ID  SIZE  MODIFIED')
+            if lines and ('NAME' in lines[0] and 'SIZE' in lines[0]):
+                lines = lines[1:]
+            for line in lines:
+                parts = line.split()
+                if not parts:
+                    continue
+                model_name = parts[0]
+                key = f"ollama/{model_name}"
+                # Preserve availability if already detected via API
+                existing = self.models.get(key)
+                is_available = existing.is_available if existing else False
+                base_url = existing.base_url if existing else self._ollama_base_url
+                self.models[key] = LLMModel(
+                    name=model_name,
+                    provider=LLMProvider.OLLAMA,
+                    base_url=base_url,
+                    is_available=is_available,
+                    last_checked=time.time(),
+                    capabilities=['payload_generation', 'code_analysis', 'text_generation']
+                )
+            # Ensure deterministic ordering by recreating dict in sorted order
+            self.models = {k: self.models[k] for k in sorted(self.models.keys(), key=lambda x: (self.models[x].provider.value, self.models[x].name.lower()))}
+        except Exception as e:
+            logger.debug(f"Ollama CLI detection skipped: {e}")
 
     def _detect_lm_studio_models(self) -> None:
         """Detect LM Studio models"""

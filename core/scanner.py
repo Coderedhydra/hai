@@ -13,6 +13,8 @@ import threading
 from typing import Dict, List, Optional, Any, Tuple, Set
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
+import queue
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -51,30 +53,78 @@ class VulnerabilityScanner:
 
         self.discovered_urls = set()
         self.executor = ThreadPoolExecutor(max_workers=5)
+        self._rate_limit_delay = 0.2
+        self._max_retries = 2
 
-    def discover_urls(self, base_url: str, max_depth: int = 3) -> List[str]:
-        """Discover URLs with enhanced crawling"""
+    def discover_urls(self, base_url: str, max_depth: int = 3, scan_session_id: Optional[str] = None) -> List[str]:
+        """Discover internal URLs with concurrent BFS, JS/robots/sitemap awareness."""
         logger.info(f"Starting URL discovery for {base_url}")
         self.discovered_urls.clear()
 
+        if not REQUESTS_AVAILABLE or not self.session:
+            logger.warning("Cannot crawl URLs - requests not available")
+            return [base_url]
+
         try:
-            # Use thread pool for concurrent discovery
-            future_to_url = {}
+            base_parsed = urllib.parse.urlparse(base_url)
+            base_origin = f"{base_parsed.scheme}://{base_parsed.netloc}"
 
-            with self.executor as executor:
-                # Submit initial URL
-                future = executor.submit(self._crawl_url, base_url, 0, max_depth, base_url)
-                future_to_url[future] = base_url
+            to_visit = queue.Queue()
+            visited: Set[str] = set()
 
-                # Process results as they complete
-                for future in as_completed(future_to_url):
+            # Seed queue with base URL and common discovery endpoints
+            seeds = [base_url, urllib.parse.urljoin(base_origin, '/robots.txt'), urllib.parse.urljoin(base_origin, '/sitemap.xml')]
+            for seed in seeds:
+                to_visit.put((seed, 0))
+
+            def should_visit(url: str) -> bool:
+                try:
+                    parsed = urllib.parse.urlparse(url)
+                    if parsed.netloc != base_parsed.netloc:
+                        return False
+                    if parsed.scheme not in ('http', 'https'):
+                        return False
+                    if url in visited:
+                        return False
+                    return True
+                except Exception:
+                    return False
+
+            discovered: Set[str] = set()
+
+            with ThreadPoolExecutor(max_workers=5) as exec_pool:
+                futures = []
+
+                while not to_visit.empty():
+                    url, depth = to_visit.get()
+                    if depth > max_depth:
+                        continue
+                    if not should_visit(url):
+                        continue
+                    visited.add(url)
+                    futures.append(exec_pool.submit(self._crawl_url, url, depth, max_depth, base_url))
+
+                for fut in as_completed(futures):
                     try:
-                        urls = future.result()
-                        self.discovered_urls.update(urls)
+                        urls = fut.result()
+                        for u in urls:
+                            if u not in discovered and should_visit(u):
+                                discovered.add(u)
+                                # Breadth-first enqueue for next depth
+                                parsed = urllib.parse.urlparse(u)
+                                if parsed.netloc == base_parsed.netloc:
+                                    to_visit.put((u, depth + 1 if 'depth' in locals() else 1))
+                                # Persist discovered URL
+                                if scan_session_id and self.db_manager:
+                                    try:
+                                        self.db_manager.save_discovered_url(scan_session_id, u)
+                                    except Exception:
+                                        pass
                     except Exception as e:
-                        logger.warning(f"Error crawling URL: {e}")
+                        logger.warning(f"Error in discovery future: {e}")
 
-            urls_list = list(self.discovered_urls)
+            self.discovered_urls.update(discovered)
+            urls_list = sorted(self.discovered_urls)
             logger.info(f"Discovered {len(urls_list)} URLs")
             return urls_list
 
@@ -92,7 +142,7 @@ class VulnerabilityScanner:
             return {url}
 
         try:
-            response = self.session.get(url, timeout=30)
+            response = self._request_with_retries('GET', url, timeout=15)
             discovered.add(url)
 
             if response.status_code == 200 and depth < max_depth:
@@ -101,13 +151,11 @@ class VulnerabilityScanner:
                     soup = BeautifulSoup(response.content, 'html.parser')
 
                     # Extract links
-                    for link in soup.find_all(['a', 'form'], href=True):
-                        href = link.get('href')
+                    for tag in soup.find_all(['a']):
+                        href = tag.get('href')
                         if href:
                             full_url = urllib.parse.urljoin(url, href)
                             parsed = urllib.parse.urlparse(full_url)
-
-                            # Only include internal URLs
                             base_parsed = urllib.parse.urlparse(base_url)
                             if parsed.netloc == base_parsed.netloc:
                                 discovered.add(full_url)
@@ -118,6 +166,21 @@ class VulnerabilityScanner:
                         if action:
                             form_url = urllib.parse.urljoin(url, action)
                             discovered.add(form_url)
+
+                    # Extract script src and inline URLs
+                    for script in soup.find_all('script'):
+                        src = script.get('src')
+                        if src:
+                            script_url = urllib.parse.urljoin(url, src)
+                            discovered.add(script_url)
+                        else:
+                            # Inline JS: find URL patterns
+                            js_text = script.text or ''
+                            for match in re.findall(r"https?://[\w\.-]+(?:/[\w\-./?%&=]*)?", js_text):
+                                parsed = urllib.parse.urlparse(match)
+                                base_parsed = urllib.parse.urlparse(base_url)
+                                if parsed.netloc == base_parsed.netloc:
+                                    discovered.add(match)
                 else:
                     logger.warning("Cannot parse HTML - beautifulsoup4 not available")
 
@@ -132,7 +195,7 @@ class VulnerabilityScanner:
         logger.info(f"Starting comprehensive scan of {target_url}")
 
         # Discover URLs first
-        urls = self.discover_urls(target_url)
+        urls = self.discover_urls(target_url, max_depth=3, scan_session_id=scan_session_id)
         urls.append(target_url)
 
         all_results = []
@@ -179,6 +242,8 @@ class VulnerabilityScanner:
                 return self._test_command_injection(url, scan_session_id)
             elif scan_type == 'xxe':
                 return self._test_xxe(url, scan_session_id)
+            elif scan_type == 'secrets':
+                return self._test_secrets_exposure(url, scan_session_id)
             else:
                 logger.warning(f"Unknown scan type: {scan_type}")
                 return []
@@ -208,7 +273,7 @@ class VulnerabilityScanner:
                     test_url = self._inject_payload(url, param, payload.value)
                     start_time = time.time()
 
-                    response = self.session.get(test_url, timeout=30)
+                    response = self._request_with_retries('GET', test_url, timeout=20)
 
                     response_time = time.time() - start_time
 
@@ -240,7 +305,7 @@ class VulnerabilityScanner:
                         self.db_manager.save_scan_result(result, scan_session_id)
 
                     # Rate limiting
-                    time.sleep(0.5)
+                    time.sleep(self._rate_limit_delay)
 
                     if extracted_data:
                         break  # Stop testing this URL if critical vulnerability found
@@ -267,7 +332,7 @@ class VulnerabilityScanner:
             try:
                 test_url = self._inject_payload(url, 'xss_test', payload.value)
 
-                response = self.session.get(test_url, timeout=30)
+                response = self._request_with_retries('GET', test_url, timeout=20)
 
                 # Check if payload is reflected
                 is_vulnerable = payload.value in response.text or urllib.parse.unquote(payload.value) in response.text
@@ -292,7 +357,7 @@ class VulnerabilityScanner:
                 # Update payload effectiveness
                 payload_manager.update_payload_effectiveness(payload, is_vulnerable)
 
-                time.sleep(0.5)
+                time.sleep(self._rate_limit_delay)
 
             except Exception as e:
                 logger.error(f"Error testing XSS on {url}: {e}")
@@ -314,7 +379,7 @@ class VulnerabilityScanner:
                 for param in param_names:
                     test_url = self._inject_payload(url, param, payload.value)
 
-                    response = self.session.get(test_url, timeout=30)
+                    response = self._request_with_retries('GET', test_url, timeout=20)
 
                     # Check for file inclusion indicators
                     lfi_indicators = [
@@ -345,7 +410,7 @@ class VulnerabilityScanner:
                     # Update payload effectiveness
                     payload_manager.update_payload_effectiveness(payload, is_vulnerable)
 
-                    time.sleep(0.5)
+                    time.sleep(self._rate_limit_delay)
 
                     if is_vulnerable:
                         break
@@ -426,7 +491,7 @@ class VulnerabilityScanner:
                     'Accept': 'application/xml, text/xml'
                 }
 
-                response = self.session.post(url, data=payload.value, headers=headers, timeout=30)
+                response = self._request_with_retries('POST', url, data=payload.value, headers=headers, timeout=20)
 
                 # Check for XXE indicators
                 xxe_indicators = [
@@ -456,7 +521,7 @@ class VulnerabilityScanner:
                 # Update payload effectiveness
                 payload_manager.update_payload_effectiveness(payload, is_vulnerable)
 
-                time.sleep(0.5)
+                time.sleep(self._rate_limit_delay)
 
             except Exception as e:
                 logger.error(f"Error testing XXE on {url}: {e}")
@@ -532,3 +597,52 @@ class VulnerabilityScanner:
             extracted['extracted_data'] = data_found
 
         return extracted if extracted else None
+
+    def _request_with_retries(self, method: str, url: str, headers: Optional[Dict[str, str]] = None,
+                              data: Any = None, timeout: int = 20):
+        """Uniform HTTP requests with retries and basic backoff."""
+        if not REQUESTS_AVAILABLE or not self.session:
+            raise RuntimeError("Requests session not available")
+
+        last_exc = None
+        for attempt in range(self._max_retries + 1):
+            try:
+                if method.upper() == 'GET':
+                    resp = self.session.get(url, headers=headers, timeout=timeout)
+                else:
+                    resp = self.session.post(url, headers=headers, data=data, timeout=timeout)
+                return resp
+            except Exception as e:
+                last_exc = e
+                sleep_for = self._rate_limit_delay * (2 ** attempt)
+                time.sleep(sleep_for)
+        raise last_exc
+
+    def _test_secrets_exposure(self, url: str, scan_session_id: str) -> List[Dict[str, Any]]:
+        """Scan response content for API keys and secrets exposure."""
+        results = []
+        try:
+            response = self._request_with_retries('GET', url, timeout=15)
+            from core.secrets_detector import SecretsDetector
+            detector = SecretsDetector()
+            findings = detector.find_in_text(response.text or '')
+            for f in findings:
+                result = {
+                    'target_url': url,
+                    'vulnerability_type': 'Secrets Exposure',
+                    'payload': 'GET',
+                    'response_code': getattr(response, 'status_code', None),
+                    'response_content': None,
+                    'is_vulnerable': True,
+                    'confidence_score': f.get('confidence', 0.8),
+                    'data_extracted': True,
+                    'extracted_data': f,
+                    'severity': 'CRITICAL' if f.get('high_risk') else 'HIGH'
+                }
+                results.append(result)
+                # Save immediately
+                self.db_manager.save_scan_result(result, scan_session_id)
+            time.sleep(self._rate_limit_delay)
+        except Exception as e:
+            logger.error(f"Error testing secrets exposure on {url}: {e}")
+        return results

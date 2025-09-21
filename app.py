@@ -186,18 +186,18 @@ if FLASK_AVAILABLE and app:
 
     @app.route('/api/models', methods=['GET'])
     def get_available_models():
-        """Get available LLM models"""
+        """Get LLM models in deterministic order, including locally downloaded ones."""
         try:
-            models = llm_manager.detect_local_models()
+            models = llm_manager.list_models(only_available=False)
             return jsonify({
                 'models': [
                     {
-                        'name': name,
-                        'provider': model.provider.value,
-                        'is_available': model.is_available,
-                        'capabilities': model.capabilities
+                        'name': m.name,
+                        'provider': m.provider.value,
+                        'is_available': m.is_available,
+                        'capabilities': m.capabilities
                     }
-                    for name, model in models.items()
+                    for m in models
                 ]
             })
         except Exception as e:
@@ -220,7 +220,7 @@ if FLASK_AVAILABLE and app:
                 session['scan_session_id'] = scan_session_id
 
             # Discover URLs using scanner
-            urls = scanner.discover_urls(target_url)
+            urls = scanner.discover_urls(target_url, max_depth=config.get('max_url_depth', 3), scan_session_id=scan_session_id)
 
             # Store discovered URLs in database
             for url in urls:
@@ -256,7 +256,7 @@ if FLASK_AVAILABLE and app:
             return jsonify({'error': 'Invalid CSRF token'}), 403
 
         # Get scan configuration
-        scan_types = data.get('scan_types', ['sql_injection', 'xss', 'lfi', 'command_injection', 'xxe'])
+        scan_types = data.get('scan_types', ['sql_injection', 'xss', 'lfi', 'command_injection', 'xxe', 'secrets'])
         target_url = session['target_url']
         scan_session_id = session.get('scan_session_id')
 
