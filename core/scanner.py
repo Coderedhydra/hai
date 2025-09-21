@@ -8,8 +8,6 @@ intelligent payload management, and comprehensive monitoring.
 """
 
 import time
-import requests
-from bs4 import BeautifulSoup
 import urllib.parse
 import threading
 from typing import Dict, List, Optional, Any, Tuple, Set
@@ -18,6 +16,21 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Optional imports
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
+    logger.warning("requests not available - HTTP operations will be limited")
+
+try:
+    from bs4 import BeautifulSoup
+    BS4_AVAILABLE = True
+except ImportError:
+    BS4_AVAILABLE = False
+    logger.warning("beautifulsoup4 not available - HTML parsing will be limited")
+
 class VulnerabilityScanner:
     """Enhanced vulnerability scanner with modular architecture"""
 
@@ -25,10 +38,17 @@ class VulnerabilityScanner:
         self.llm_manager = llm_manager
         self.db_manager = db_manager
         self.monitoring_manager = monitoring_manager
-        self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        })
+
+        # Initialize session if requests is available
+        if REQUESTS_AVAILABLE:
+            import requests
+            self.session = requests.Session()
+            self.session.headers.update({
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            })
+        else:
+            self.session = None
+
         self.discovered_urls = set()
         self.executor = ThreadPoolExecutor(max_workers=5)
 
@@ -66,31 +86,40 @@ class VulnerabilityScanner:
         """Crawl a single URL and return discovered URLs"""
         discovered = set()
 
+        # Cannot crawl without requests
+        if not REQUESTS_AVAILABLE or not self.session:
+            logger.warning("Cannot crawl URLs - requests not available")
+            return {url}
+
         try:
             response = self.session.get(url, timeout=30)
             discovered.add(url)
 
             if response.status_code == 200 and depth < max_depth:
-                soup = BeautifulSoup(response.content, 'html.parser')
+                if BS4_AVAILABLE:
+                    from bs4 import BeautifulSoup
+                    soup = BeautifulSoup(response.content, 'html.parser')
 
-                # Extract links
-                for link in soup.find_all(['a', 'form'], href=True):
-                    href = link.get('href')
-                    if href:
-                        full_url = urllib.parse.urljoin(url, href)
-                        parsed = urllib.parse.urlparse(full_url)
+                    # Extract links
+                    for link in soup.find_all(['a', 'form'], href=True):
+                        href = link.get('href')
+                        if href:
+                            full_url = urllib.parse.urljoin(url, href)
+                            parsed = urllib.parse.urlparse(full_url)
 
-                        # Only include internal URLs
-                        base_parsed = urllib.parse.urlparse(base_url)
-                        if parsed.netloc == base_parsed.netloc:
-                            discovered.add(full_url)
+                            # Only include internal URLs
+                            base_parsed = urllib.parse.urlparse(base_url)
+                            if parsed.netloc == base_parsed.netloc:
+                                discovered.add(full_url)
 
-                # Extract form actions
-                for form in soup.find_all('form'):
-                    action = form.get('action', '')
-                    if action:
-                        form_url = urllib.parse.urljoin(url, action)
-                        discovered.add(form_url)
+                    # Extract form actions
+                    for form in soup.find_all('form'):
+                        action = form.get('action', '')
+                        if action:
+                            form_url = urllib.parse.urljoin(url, action)
+                            discovered.add(form_url)
+                else:
+                    logger.warning("Cannot parse HTML - beautifulsoup4 not available")
 
         except Exception as e:
             logger.warning(f"Error crawling {url}: {e}")
@@ -165,6 +194,11 @@ class VulnerabilityScanner:
         results = []
         payloads = payload_manager.generate_contextual_payloads('sql_injection', url, '', self.llm_manager)
 
+        # Cannot test without requests
+        if not REQUESTS_AVAILABLE or not self.session:
+            logger.warning("Cannot test SQL injection - requests not available")
+            return results
+
         for payload in payloads[:20]:  # Limit to 20 payloads per URL
             try:
                 # Test different parameters
@@ -223,6 +257,11 @@ class VulnerabilityScanner:
 
         results = []
         payloads = payload_manager.generate_contextual_payloads('xss', url, '', self.llm_manager)
+
+        # Cannot test without requests
+        if not REQUESTS_AVAILABLE or not self.session:
+            logger.warning("Cannot test XSS - requests not available")
+            return results
 
         for payload in payloads[:15]:  # Limit XSS payloads
             try:

@@ -1,0 +1,4 @@
+2025-09-21 08:45:05,736 - core.database - INFO - Database initialized with optimized schema
+2025-09-21 08:45:05,737 - __main__ - INFO - Flask not available - running in core-only mode
+2025-09-21 08:45:05,737 - __main__ - INFO - Core scanner functionality is available via direct imports
+2025-09-21 08:45:05,737 - __main__ - INFO - To enable web interface, install Flask: pip install flask flask-cors flask-limiter
